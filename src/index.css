@@ -1,0 +1,89 @@
+@import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@500;600&display=swap");
+
+:root {
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color-scheme: light;
+  scroll-behavior: smooth;
+  --text-primary: #1f2937;
+  --text-secondary: #6b7280;
+}
+
+html.theme-dark {
+  color-scheme: dark;
+  --text-primary: #e5e7eb;
+  --text-secondary: #cbd5e1;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+a {
+  font-weight: 600;
+  color: #2c6ff6;
+  text-decoration: none;
+}
+a:hover {
+  color: #1e4ebe;
+  text-decoration: underline;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  width: 100%;
+  background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+  color: var(--text-primary);
+  font-family: "Inter", "Poppins", "Segoe UI", system-ui, -apple-system, sans-serif;
+  line-height: 1.6;
+}
+
+body.theme-dark {
+  background: radial-gradient(circle at 20% 20%, rgba(148, 163, 184, 0.08), transparent 35%),
+    radial-gradient(circle at 80% 0%, rgba(59, 130, 246, 0.08), transparent 32%),
+    linear-gradient(180deg, #0f172a 0%, #111827 45%, #0b1220 100%);
+  color: var(--text-primary);
+}
+
+.Toastify__toast-container {
+  z-index: 9999;
+}
+
+#root {
+  min-height: 100vh;
+  width: 100%;
+}
+
+button {
+  font-family: inherit;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+h1 {
+  color: var(--text-primary);
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+h2,
+h3,
+h4 {
+  color: var(--text-primary);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+p,
+span,
+label {
+  color: var(--text-secondary);
+}

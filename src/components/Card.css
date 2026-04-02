@@ -1,0 +1,49 @@
+/* ========== CARD COMPONENT — hover lift, shadow, 8px grid ========== */
+
+.card {
+  background-color: var(--white);
+  border-radius: 12px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  transition: all 0.3s ease;
+}
+
+.card--padding-sm {
+  padding: var(--space-3, 12px);
+}
+
+.card--padding-md {
+  padding: var(--space-5, 20px);
+}
+
+.card--padding-lg {
+  padding: var(--space-6, 24px);
+}
+
+.card--padding-none {
+  padding: 0;
+}
+
+.card--hoverable:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+}
+
+.card--clickable {
+  cursor: pointer;
+}
+
+.card--clickable:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+.global-layout.dark-mode .card {
+  background-color: var(--dark-surface);
+  border-color: var(--dark-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.global-layout.dark-mode .card--hoverable:hover {
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.35);
+}

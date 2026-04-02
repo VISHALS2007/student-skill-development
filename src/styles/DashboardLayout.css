@@ -1,0 +1,37 @@
+.dashboard-wrapper {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.dashboard-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 24px;
+  align-items: start;
+}
+
+.dashboard-card {
+  width: 100%;
+  max-width: 420px;
+  height: fit-content;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-container {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .dashboard-container {
+    grid-template-columns: 1fr;
+  }
+}
+
+.camera-preview {
+  width: 100%;
+  height: 200px;
+  background: #ddd;
+  border-radius: 12px;
+}

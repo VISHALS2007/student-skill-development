@@ -2378,7 +2378,7 @@ export async function listUsers(req, res) {
     }
 
     if (search) {
-      items = items.filter((u) => `${u.name || ""} ${u.email || ""}`.toLowerCase().includes(search));
+      items = items.filter((u) => `${u.id || ""} ${u.name || ""} ${u.email || ""}`.toLowerCase().includes(search));
     }
     items = dedupeUsersByEmail(items);
     const safeItems = items.map(({ password, ...safe }) => safe);
@@ -2438,7 +2438,7 @@ export async function listUsers(req, res) {
     }
 
     if (search) {
-      items = items.filter((u) => `${u.name || ""} ${u.email || ""}`.toLowerCase().includes(search));
+      items = items.filter((u) => `${u.id || ""} ${u.name || ""} ${u.email || ""}`.toLowerCase().includes(search));
     }
     items = dedupeUsersByEmail(items);
 

@@ -1415,7 +1415,7 @@ export default function AdminDashboard() {
           <div className="flex flex-wrap gap-2 mb-4">
             <div className="flex-1 flex items-center gap-2 px-3 py-2 rounded-xl border border-slate-200 bg-slate-50">
               <FiSearch className="text-slate-400" />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name or email" className="w-full bg-transparent outline-none text-sm" />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name, email, or user ID" className="w-full bg-transparent outline-none text-sm" />
             </div>
             {isMainAdminRole(adminRole) && (
               <select value={userRoleFilter} onChange={(e) => setUserRoleFilter(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 text-sm bg-white">
@@ -1440,6 +1440,7 @@ export default function AdminDashboard() {
                 <div>
                   <p className="font-semibold text-slate-900">{user.name || user.email}</p>
                   <p className="text-xs text-slate-500">{user.email}</p>
+                  <p className="text-xs text-slate-500">User ID: {user.id}</p>
                   <p className="text-xs text-slate-500 uppercase">Role: {normalizeAdminRole(user.role || "student")}</p>
                 </div>
                 <div className="ui-actions flex gap-2">

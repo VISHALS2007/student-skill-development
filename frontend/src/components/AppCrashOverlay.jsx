@@ -4,13 +4,31 @@ import React, { useEffect, useState } from "react";
 export default function AppCrashOverlay() {
   const [message, setMessage] = useState("");
 
+  const isIgnorableNetworkError = (rawMessage = "", rawReason = "") => {
+    const text = `${String(rawMessage || "")} ${String(rawReason || "")}`.toLowerCase();
+    return (
+      text.includes("failed to fetch") ||
+      text.includes("networkerror") ||
+      text.includes("network request failed") ||
+      text.includes("load failed") ||
+      text.includes("aborterror") ||
+      text.includes("the operation was aborted")
+    );
+  };
+
   useEffect(() => {
     const handleError = (event) => {
       const msg = event?.error?.message || event?.message || "Unknown error";
+      if (isIgnorableNetworkError(msg)) return;
       setMessage(msg);
     };
     const handleRejection = (event) => {
-      const msg = event?.reason?.message || String(event?.reason) || "Promise rejection";
+      const reason = event?.reason;
+      const msg = reason?.message || String(reason) || "Promise rejection";
+      if (isIgnorableNetworkError(msg, reason)) {
+        event?.preventDefault?.();
+        return;
+      }
       setMessage(msg);
     };
     window.addEventListener("error", handleError);

@@ -108,12 +108,23 @@ const SkillSystem = () => {
   };
 
   const getAuthHeaders = async () => {
-    const token = await user.getIdToken();
-    return {
+    const headers = {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      "x-student-session": JSON.stringify({ uid: user.uid, email: user.email || "", role: "student" }),
+      "x-student-session": JSON.stringify({ uid: user?.uid || "", email: user?.email || "", role: "student" }),
     };
+
+    if (typeof user?.getIdToken === "function") {
+      try {
+        const token = await user.getIdToken();
+        if (token) {
+          headers.Authorization = `Bearer ${token}`;
+        }
+      } catch (err) {
+        console.warn("Skill API token fetch failed; using session header fallback", err);
+      }
+    }
+
+    return headers;
   };
 
   const loadStudentSkills = async () => {
@@ -347,7 +358,8 @@ const SkillSystem = () => {
       resetSkillForm(true);
     } catch (err) {
       console.error("Failed to save skill", err);
-      notify("error", "Could not save skill. Try again.");
+      const message = String(err?.message || "").trim();
+      notify("error", message || "Could not save skill. Try again.");
     } finally {
       setSaving(false);
     }

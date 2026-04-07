@@ -2,10 +2,15 @@
   "name": "skilldevelopment-2-workspace",
   "private": true,
   "scripts": {
-    "dev": "npm --prefix frontend run dev",
+    "dev": "node scripts/dev.mjs",
+    "dev:backend": "npm --prefix server run dev",
+    "dev:mongo": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev",
     "build": "npm --prefix frontend run build",
     "preview": "npm --prefix frontend run preview",
     "lint": "npm --prefix frontend run lint",
-    "install:frontend": "npm --prefix frontend install"
+    "install:frontend": "npm --prefix frontend install",
+    "install:backend": "npm --prefix server install",
+    "install:mongo": "npm --prefix backend install"
   }
 }

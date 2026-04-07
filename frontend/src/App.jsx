@@ -69,6 +69,9 @@ function LandingRedirect() {
       return;
     }
     let active = true;
+    const fallbackTimer = setTimeout(() => {
+      if (active) setTarget("/student");
+    }, 3500);
     const resolveTarget = async () => {
       try {
         const profile = await ensureUserProfile(user, {
@@ -90,11 +93,14 @@ function LandingRedirect() {
         if (active) setTarget(resolveHomeRouteByRole(profile?.role || "student"));
       } catch {
         if (active) setTarget("/dashboard");
+      } finally {
+        clearTimeout(fallbackTimer);
       }
     };
     resolveTarget();
     return () => {
       active = false;
+      clearTimeout(fallbackTimer);
     };
   }, [loading, user]);
 
@@ -120,7 +126,27 @@ function LandingRedirect() {
     );
   }
 
-  if (!target) return null;
+  if (!target) {
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minHeight: "100vh",
+          background: "#f8fafc",
+          fontSize: "16px",
+          color: "#6b7280",
+          fontFamily: "Inter, Poppins, Roboto, system-ui",
+        }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "32px", marginBottom: "12px" }}>⏳</div>
+          <div>Opening your workspace...</div>
+        </div>
+      </div>
+    );
+  }
   return <Navigate to={target} replace />;
 }
 

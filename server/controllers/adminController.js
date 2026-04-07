@@ -2347,6 +2347,12 @@ export async function listUsers(req, res) {
       .map((d) => enrichUserAcademicMeta({ id: d.id, ...d.data() }))
       .filter((u) => isInstitutionEmail(u.email || ""));
 
+    const localItems = readLocalStudentProfiles()
+      .map((u) => enrichUserAcademicMeta({ ...u, role: normalizeRole(u.role || "student") || "student" }))
+      .filter((u) => isInstitutionEmail(u.email || ""));
+
+    items = dedupeUsersByEmail([...items, ...localItems]);
+
     if (effectiveRole !== "all") {
       items = items.filter((u) => normalizeRole(u.role || "student") === effectiveRole);
     }

@@ -125,6 +125,22 @@ export async function verifyAuth(req, res, next) {
     try {
       const userDoc = await firestore.collection("users").doc(decoded.uid).get();
       if (!userDoc.exists) {
+        try {
+          await firestore.collection("users").doc(decoded.uid).set(
+            {
+              id: decoded.uid,
+              email: decoded.email || "",
+              name: decoded.name || "",
+              role: "student",
+              enabled: true,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        } catch {
+          // Ignore Firestore write failures and continue with local fallback.
+        }
         seedLocalStudentProfile(decoded.uid, decoded.email || "");
         req.user = { uid: decoded.uid, role: "student", email: decoded.email || "" };
         return next();
@@ -132,6 +148,22 @@ export async function verifyAuth(req, res, next) {
       const profile = userDoc.data() || {};
       if (profile.enabled === false) {
         return res.status(403).json({ error: "Account is disabled" });
+      }
+      if (!profile.role || !profile.email) {
+        firestore
+          .collection("users")
+          .doc(decoded.uid)
+          .set(
+            {
+              role: profile.role || "student",
+              email: profile.email || decoded.email || "",
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          )
+          .catch(() => {
+            // Non-blocking self-heal.
+          });
       }
       req.user = { uid: decoded.uid, role: normalizeRole(profile.role) || "student", email: decoded.email || "" };
       return next();

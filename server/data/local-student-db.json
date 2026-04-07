@@ -1,0 +1,250 @@
+{
+  "users": {
+    "student-seed-1": {
+      "profile": {
+        "id": "student-seed-1",
+        "name": "",
+        "email": "vishal@bitsathy.ac.in",
+        "role": "student",
+        "enabled": true
+      },
+      "skills": [],
+      "courses": [
+        {
+          "id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "status": "assigned",
+          "startDate": "2026-04-05",
+          "endDate": "2026-04-06",
+          "source": "admin",
+          "assignedAt": "2026-04-05T13:35:14.838Z",
+          "updatedAt": "2026-04-05T13:35:14.838Z"
+        }
+      ],
+      "assignments": [],
+      "attendance": [
+        {
+          "id": "student-seed-1_521f975f-e38c-45ab-9844-2e1e2bbd0513_2026-04-05",
+          "user_id": "student-seed-1",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "date": "2026-04-05",
+          "status": "absent",
+          "markedAt": "2026-04-06T16:36:31.054Z"
+        },
+        {
+          "id": "student-seed-1_521f975f-e38c-45ab-9844-2e1e2bbd0513_2026-04-06",
+          "user_id": "student-seed-1",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "date": "2026-04-06",
+          "status": "absent",
+          "markedAt": "2026-04-06T17:17:34.450Z"
+        }
+      ],
+      "progress": [],
+      "resources": []
+    },
+    "yIet2YzKqZhFnh7f791c8cjls8U2": {
+      "profile": {
+        "id": "yIet2YzKqZhFnh7f791c8cjls8U2",
+        "name": "",
+        "email": "vishal.ec23@bitsathy.ac.in",
+        "role": "student",
+        "enabled": true
+      },
+      "skills": [],
+      "courses": [
+        {
+          "id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "status": "assigned",
+          "startDate": "2026-04-05",
+          "endDate": "2026-04-06",
+          "source": "admin",
+          "assignedAt": "2026-04-05T13:35:14.840Z",
+          "updatedAt": "2026-04-05T13:35:14.840Z"
+        }
+      ],
+      "assignments": [],
+      "attendance": [
+        {
+          "id": "yIet2YzKqZhFnh7f791c8cjls8U2_521f975f-e38c-45ab-9844-2e1e2bbd0513_2026-04-05",
+          "user_id": "yIet2YzKqZhFnh7f791c8cjls8U2",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "date": "2026-04-05",
+          "status": "absent",
+          "markedAt": "2026-04-06T16:36:31.054Z"
+        },
+        {
+          "id": "yIet2YzKqZhFnh7f791c8cjls8U2_521f975f-e38c-45ab-9844-2e1e2bbd0513_2026-04-06",
+          "user_id": "yIet2YzKqZhFnh7f791c8cjls8U2",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "date": "2026-04-06",
+          "status": "absent",
+          "markedAt": "2026-04-06T17:17:34.450Z"
+        }
+      ],
+      "progress": [],
+      "resources": []
+    },
+    "tZdomt5LRuNRfgxpmLm4PlVEmg03": {
+      "profile": {
+        "id": "tZdomt5LRuNRfgxpmLm4PlVEmg03",
+        "name": "",
+        "email": "vishals.ec23@bitsathy.ac.in",
+        "role": "student",
+        "enabled": true
+      },
+      "skills": [
+        {
+          "id": "491379a8-0031-407b-87dc-3cb8d03d195b",
+          "user_id": "tZdomt5LRuNRfgxpmLm4PlVEmg03",
+          "title": "Communication Practice",
+          "description": "",
+          "addedBy": "student",
+          "createdAt": "2026-04-07T03:38:42.446Z",
+          "updatedAt": "2026-04-07T04:13:24.524Z"
+        },
+        {
+          "id": "c8dda1b2-bff1-471a-8d9f-17eb9267726e",
+          "user_id": "tZdomt5LRuNRfgxpmLm4PlVEmg03",
+          "title": "Aptitude Practice",
+          "description": "",
+          "addedBy": "student",
+          "createdAt": "2026-04-07T04:10:37.732Z",
+          "updatedAt": "2026-04-07T04:10:37.732Z"
+        },
+        {
+          "id": "b7c9b387-6827-47a1-b2a2-74749f3b3f0a",
+          "user_id": "tZdomt5LRuNRfgxpmLm4PlVEmg03",
+          "title": "Coding Practice",
+          "description": "",
+          "addedBy": "student",
+          "createdAt": "2026-04-07T04:13:47.503Z",
+          "updatedAt": "2026-04-07T04:13:47.503Z"
+        },
+        {
+          "id": "29701c01-8943-4e0f-a19d-33de2421e5a0",
+          "user_id": "tZdomt5LRuNRfgxpmLm4PlVEmg03",
+          "title": "Aptitude Practice",
+          "description": "",
+          "addedBy": "student",
+          "createdAt": "2026-04-07T04:23:35.285Z",
+          "updatedAt": "2026-04-07T04:23:35.285Z"
+        }
+      ],
+      "courses": [],
+      "assignments": [],
+      "attendance": [],
+      "progress": [],
+      "resources": []
+    },
+    "debug-user": {
+      "profile": {
+        "id": "debug-user",
+        "name": "",
+        "email": "debug@bitsathy.ac.in",
+        "role": "student",
+        "enabled": true
+      },
+      "skills": [
+        {
+          "id": "4b9a1228-bf87-4207-a3e6-e347b7091b45",
+          "user_id": "debug-user",
+          "title": "Communication Practice",
+          "description": "",
+          "addedBy": "student",
+          "createdAt": "2026-04-07T03:36:15.873Z",
+          "updatedAt": "2026-04-07T03:36:15.873Z"
+        }
+      ],
+      "courses": [],
+      "assignments": [],
+      "attendance": [],
+      "progress": [],
+      "resources": []
+    },
+    "audit-student": {
+      "profile": {
+        "id": "audit-student",
+        "name": "",
+        "email": "ec23test@bitsathy.ac.in",
+        "role": "student",
+        "enabled": true
+      },
+      "skills": [
+        {
+          "id": "90b37553-05c0-46c6-b564-4467204239cc",
+          "user_id": "audit-student",
+          "title": "Problem Solving",
+          "description": "Audit skill",
+          "addedBy": "student",
+          "createdAt": "2026-04-07T03:52:44.618Z",
+          "updatedAt": "2026-04-07T03:52:44.618Z"
+        }
+      ],
+      "courses": [],
+      "assignments": [],
+      "attendance": [],
+      "progress": [],
+      "resources": []
+    },
+    "audit-user-1": {
+      "profile": {
+        "id": "audit-user-1",
+        "name": "",
+        "email": "audit-user-1@bitsathy.ac.in",
+        "role": "student",
+        "enabled": true
+      },
+      "skills": [
+        {
+          "id": "4cd7eae2-6b16-4985-9db5-15888caf393a",
+          "user_id": "audit-user-1",
+          "title": "Audit Skill 20260407035626",
+          "description": "Created by audit probe",
+          "addedBy": "student",
+          "createdAt": "2026-04-07T03:56:26.709Z",
+          "updatedAt": "2026-04-07T03:56:26.709Z"
+        },
+        {
+          "id": "a55ed6cf-2f72-40ee-8ebf-006bb6f071ab",
+          "user_id": "audit-user-1",
+          "title": "Audit Skill 20260407035641",
+          "description": "Created by audit probe",
+          "addedBy": "student",
+          "createdAt": "2026-04-07T03:56:41.924Z",
+          "updatedAt": "2026-04-07T03:56:41.924Z"
+        },
+        {
+          "id": "d83a4ab4-aa58-4c2b-a727-e38ad1c1d57a",
+          "user_id": "audit-user-1",
+          "title": "Audit Skill 1775534217920",
+          "description": "Created by audit probe",
+          "addedBy": "student",
+          "createdAt": "2026-04-07T03:56:57.933Z",
+          "updatedAt": "2026-04-07T03:56:57.933Z"
+        }
+      ],
+      "courses": [],
+      "assignments": [],
+      "attendance": [],
+      "progress": [],
+      "resources": []
+    },
+    "audit-user-2": {
+      "profile": {
+        "id": "audit-user-2",
+        "name": "",
+        "email": "audit-user-2@bitsathy.ac.in",
+        "role": "student",
+        "enabled": true
+      },
+      "skills": [],
+      "courses": [],
+      "assignments": [],
+      "attendance": [],
+      "progress": [],
+      "resources": []
+    }
+  }
+}

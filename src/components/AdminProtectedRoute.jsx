@@ -5,12 +5,22 @@ import { getUserProfile } from "../lib/roleHelpers";
 
 const ADMIN_SESSION_KEY = "adminSession:v1";
 
+const normalizeAdminRole = (role = "") => {
+  const normalized = String(role || "").trim().toLowerCase();
+  return normalized === "admin" ? "main_admin" : normalized;
+};
+
+const isAdminRole = (role = "") => {
+  const normalized = normalizeAdminRole(role);
+  return normalized === "main_admin" || normalized === "sub_admin";
+};
+
 const hasLocalAdminSession = () => {
   try {
     const raw = localStorage.getItem(ADMIN_SESSION_KEY);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
-    return parsed?.role === "admin";
+    return isAdminRole(parsed?.role);
   } catch (err) {
     return false;
   }
@@ -47,5 +57,5 @@ export default function AdminProtectedRoute({ children }) {
   if (hasLocalAdminSession()) return children;
   if (loading || checking) return null;
   if (!user) return <Navigate to="/login" replace />;
-  return role === "admin" ? children : <Navigate to="/dashboard" replace />;
+  return isAdminRole(role) ? children : <Navigate to="/dashboard" replace />;
 }

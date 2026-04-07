@@ -8,8 +8,10 @@
   -moz-osx-font-smoothing: grayscale;
   color-scheme: light;
   scroll-behavior: smooth;
-  --text-primary: #1f2937;
-  --text-secondary: #6b7280;
+  --text-primary: #111827;
+  --text-secondary: #374151;
+  --text-muted: #9ca3af;
+  --text-link: #4f46e5;
 }
 
 html.theme-dark {
@@ -24,11 +26,11 @@ html.theme-dark {
 
 a {
   font-weight: 600;
-  color: #2c6ff6;
+  color: var(--text-link);
   text-decoration: none;
 }
 a:hover {
-  color: #1e4ebe;
+  color: #4338ca;
   text-decoration: underline;
 }
 
@@ -37,7 +39,7 @@ body {
   min-width: 320px;
   min-height: 100vh;
   width: 100%;
-  background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);
+  background: #f8fafc;
   color: var(--text-primary);
   font-family: "Inter", "Poppins", "Segoe UI", system-ui, -apple-system, sans-serif;
   line-height: 1.6;
@@ -71,14 +73,16 @@ button:active {
 h1 {
   color: var(--text-primary);
   font-weight: 700;
+  font-size: 24px;
   line-height: 1.25;
 }
 
 h2,
 h3,
 h4 {
-  color: var(--text-primary);
+  color: #1f2937;
   font-weight: 600;
+  font-size: 18px;
   line-height: 1.35;
 }
 

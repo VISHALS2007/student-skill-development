@@ -2,20 +2,18 @@
 .admin-dashboard-shell {
   min-height: 100vh;
   padding: 28px;
-  background: radial-gradient(circle at 15% 10%, rgba(255, 236, 179, 0.45), transparent 34%),
-    radial-gradient(circle at 95% 0%, rgba(186, 230, 253, 0.4), transparent 32%),
-    linear-gradient(165deg, #f8fafc 0%, #e2e8f0 100%);
-  color: #0f172a;
+  background: #f8fafc;
+  color: #111827;
 }
 
 .admin-auth-card {
   max-width: 520px;
   margin: 5vh auto 0;
-  border-radius: 20px;
-  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
   background: #ffffff;
-  box-shadow: 0 22px 44px rgba(15, 23, 42, 0.1);
-  padding: 28px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  padding: 24px;
 }
 
 .admin-auth-head {
@@ -34,7 +32,7 @@
   margin: 0;
   font-size: 12px;
   font-weight: 700;
-  color: #0ea5e9;
+  color: #4f46e5;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -42,13 +40,14 @@
 .admin-auth-head h1,
 .admin-topbar h1 {
   margin: 2px 0 0;
-  font-size: 26px;
+  font-size: 24px;
   line-height: 1.2;
+  color: #111827;
 }
 
 .admin-subtext {
   margin: 16px 0 18px;
-  color: #475569;
+  color: #6b7280;
   font-size: 14px;
 }
 
@@ -60,37 +59,41 @@
 .admin-auth-form label {
   display: grid;
   gap: 6px;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 600;
-  color: #334155;
+  color: #1f2937;
 }
 
 .admin-auth-form input {
-  border: 1px solid #cbd5e1;
-  border-radius: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
   padding: 11px 12px;
   font-size: 14px;
 }
 
 .admin-auth-form input:focus {
   outline: none;
-  border-color: #0284c7;
-  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.16);
 }
 
 .admin-auth-form button,
 .admin-module-card button,
 .admin-logout {
   border: none;
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 11px 14px;
-  font-weight: 700;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .admin-auth-form button {
-  background: linear-gradient(90deg, #0369a1, #0284c7);
+  background: #4f46e5;
   color: #fff;
+}
+
+.admin-auth-form button:hover {
+  background: #4338ca;
 }
 
 .admin-error {
@@ -104,13 +107,13 @@
   display: flex;
   justify-content: space-between;
   gap: 10px;
-  font-size: 13px;
-  color: #475569;
+  font-size: 14px;
+  color: #6b7280;
 }
 
 .admin-auth-links a {
-  font-weight: 700;
-  color: #0369a1;
+  font-weight: 600;
+  color: #4f46e5;
 }
 
 .admin-topbar {

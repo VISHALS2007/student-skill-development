@@ -1,101 +1,93 @@
-# Professional Administrator Dashboard Workflow & Layout
+# Administrator Options and Workflow
 
-This document describes the administrator module for the Student Skill Development App.
+This document defines the administrator capabilities and operational flow for the Student Skill Development App.
 
-## 1. Administrator Dashboard – Professional Workflow
+## Administrator Options
 
-### Phase 1: Authentication
-- Administrator logs in using admin credentials.
-- System verifies `role = admin`.
-- Redirect to Admin Dashboard.
+### Dashboard
+- View system summary:
+  - Total students
+  - Total courses
+  - Completed tasks
+  - Attendance overview
 
-### Phase 2: Course & Assignment Creation
-- Admin selects Assignments Module.
-- Clicks Create Assignment.
-- Enters:
-  - Title
-  - Description
-  - Open Date
-  - Due Date
-  - Instructions
-- Save assignment.
+### User Management
+- View registered users
+- Search users by email or name
+- Select single or multiple users
+- Enable or disable users
 
-### Phase 3: Course Allocation
-Admin chooses allocation method:
-- Assign to All Users
-- Assign to Selected Users
-- Assign by Course/Batch
+### Course Management
+- Create new course
+- Edit course details
+- Delete course
+- View all courses
 
-### Phase 4: Student Interaction
-- Students login.
-- View assigned task.
-- Complete assignment.
-- Submit response.
+### Course Allocation
+- Assign a course to all users
+- Assign a course to selected users
+- Remove assigned course
 
-### Phase 5: Monitoring & Analytics
-Admin monitors:
-- Completed students
-- Pending students
-- Progress percentage
-- Submission timestamps
+### Assignment Management
+- Create assignments
+- Set open date and due date
+- Track submission status
 
-### Phase 6: Management Controls
-Admin can:
-- Edit assignment
-- Delete assignment
-- Extend deadline
-- Reassign users
+### Progress Tracking
+- View completed students
+- View incomplete students
+- Check daily progress
 
-## 2. Professional Admin Dashboard Layout
+### Attendance Management
+- Mark attendance daily
+- View attendance report
+- Filter attendance by course
 
-### Left Sidebar Navigation
-- Dashboard
-- User Management
-- Course Management
-- Assignments
-- Attendance
-- Reports & Analytics
-- Notifications
-- Settings
-- Logout
+## Administrator Workflow
 
-## 3. Dashboard Overview Layout
-- Total Users
-- Active Courses
-- Assignments
-- Completed Tasks
-- Pending Tasks
-- Attendance %
+Admin Login -> Dashboard
+-> Create Course
+-> Search Registered Users (by email)
+-> Select Users
+-> Assign Course or Assignment
+-> Students complete tasks
+-> Admin checks Completed or Incomplete
+-> Admin marks Attendance
+-> View Reports and Progress
 
-## 4. Assignments Management Layout
-- Assignments list/table
-- Create Assignment button
-- View / Edit / Delete actions
+## Example Workflow (Real Case)
 
-## 5. Create Assignment Form
-Fields:
-- Title
-- Description
-- Open Date
-- Due Date
-- Assign To: All Users / Selected Users / By Course
-- Save Assignment / Cancel
+1. Admin creates English Speaking Course.
+2. Admin searches user `vishal@bitsathy.ac.in`.
+3. Admin selects required users.
+4. Admin assigns course.
+5. Students complete tasks.
+6. Admin checks daily progress.
+7. Admin marks attendance.
+8. Admin generates report.
 
-## 6. Student Progress Tracking Layout
-- Assignment summary
-- Total Students
-- Completed
-- Pending
-- Student name
-- Status
-- Progress
-- Submitted on
+## Implementation Mapping
 
-## 7. Complete System Architecture Flow
-Admin Login -> Dashboard -> Create Assignment -> Assign Users -> Student View -> Submit -> Admin Track
-
-## 8. Implementation Notes
-- Admin login uses backend role check.
-- Admin API provides CRUD for courses and assignments.
-- Admin dashboard uses a sidebar layout and workflow sections.
-- Student access remains limited to assigned learning content.
+- Admin login: `POST /api/admin/login`
+- Dashboard data: `GET /api/admin/dashboard`
+- User management: `GET /api/admin/users`, `PATCH /api/admin/users/:userId/status`, `DELETE /api/admin/users/:userId`
+- Course management: `GET|POST|PUT|DELETE /api/admin/courses`
+- Course allocation:
+  - `POST /api/admin/courses/assign/all`
+  - `POST /api/admin/courses/assign/selected`
+  - `POST /api/admin/allocate`
+  - `GET /api/admin/allocations`
+  - `DELETE /api/admin/courses/assign/:userId/:courseId`
+- Assignment management: `GET|POST|PUT|DELETE /api/admin/assignments`
+- Progress tracking:
+  - `GET /api/admin/progress`
+  - `GET /api/admin/progress/:userId`
+  - `GET /api/admin/assignments/progress/:assignmentId`
+- Attendance management:
+  - `POST /api/admin/attendance`
+  - `POST /api/admin/attendance/mark`
+  - `POST /api/admin/attendance/bulk`
+  - `GET /api/admin/attendance`
+- Reports and analytics:
+  - `GET /api/admin/reports`
+  - `GET /api/admin/reports/attendance`

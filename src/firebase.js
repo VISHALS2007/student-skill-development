@@ -48,10 +48,12 @@ setPersistence(auth, browserLocalPersistence);
 // ==============================
 export const provider = new GoogleAuthProvider();
 
-// FORCE ACCOUNT SELECTION PAGE
-provider.setCustomParameters({
-  prompt: "select_account"
-});
+// Optional account-picker prompt (off by default for faster repeat Google login).
+if (String(import.meta.env.VITE_GOOGLE_FORCE_SELECT_ACCOUNT || "false").toLowerCase() === "true") {
+  provider.setCustomParameters({
+    prompt: "select_account"
+  });
+}
 
 
 // ==============================

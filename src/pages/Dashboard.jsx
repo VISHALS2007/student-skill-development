@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { addDoc, collection, getDocs, orderBy, query, serverTimestamp, where } from "firebase/firestore";
+import { addDoc, collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
 import { FiAlertCircle, FiCheckCircle, FiExternalLink } from "react-icons/fi";
 import GlobalLayout from "../components/GlobalLayout";
 import DashboardCard from "../components/DashboardCard";
 import { useAuth } from "../lib/AuthContext";
 import { useSkills } from "../lib/SkillsContext";
 import { db } from "../firebase";
-import { DEFAULT_SKILLS, SKILL_SITE_DEFAULTS } from "../lib/skillDefaults";
+import { SKILL_SITE_DEFAULTS } from "../lib/skillDefaults";
 import { updateAttendanceRecord } from "../services/attendanceService";
 
 const normalizeName = (name) => (name || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -21,6 +21,57 @@ const getSkillSites = (skillName, skillWebsites = []) => {
 const getDurationMs = (skill) => (Number(skill?.defaultDuration) || 30) * 60 * 1000;
 
 const TIMERS_KEY = "skillTimers:v1";
+const configuredApiBase = String(import.meta.env.VITE_API_BASE || "").trim().replace(/\/$/, "");
+const configuredApiHost = (() => {
+  if (!configuredApiBase) return "";
+  try {
+    const parsed = new URL(configuredApiBase);
+    return `${parsed.protocol}//${parsed.host}`;
+  } catch {
+    return configuredApiBase.replace(/\/api$/i, "");
+  }
+})();
+
+const API_HOSTS = Array.from(new Set([configuredApiHost, "", "http://localhost:4000", "http://localhost:5000"].filter(Boolean)));
+const RETRYABLE_STATUS = new Set([404, 408, 429, 500, 502, 503, 504]);
+
+const requestWithFallback = async (path, options = {}, timeoutMs = 8000) => {
+  let lastError = null;
+  for (const host of API_HOSTS) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${host}${path}`, { ...options, signal: controller.signal });
+      const payload = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const err = new Error(payload?.error || `Request failed (${res.status})`);
+        err.status = res.status;
+        if (RETRYABLE_STATUS.has(Number(res.status))) {
+          lastError = err;
+          continue;
+        }
+        throw err;
+      }
+      return payload;
+    } catch (err) {
+      if (err?.status && !RETRYABLE_STATUS.has(Number(err.status))) {
+        throw err;
+      }
+      lastError = err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  throw new Error(lastError?.message || "Unable to connect to backend");
+};
+
+const normalizeApiSkill = (skill = {}, index = 0) => ({
+  id: skill?.id || skill?._id || `skill-${index}`,
+  skillName: String(skill?.skillName || skill?.title || skill?.name || "Untitled Skill").trim(),
+  defaultDuration: Math.max(1, Number(skill?.defaultDuration || skill?.timerDuration || 30) || 30),
+  skillWebsites: Array.isArray(skill?.skillWebsites) ? skill.skillWebsites : Array.isArray(skill?.websites) ? skill.websites : [],
+  addedBy: String(skill?.addedBy || skill?.source || "student").toLowerCase(),
+});
 
 const persistSkillTimers = (timers) => {
   try {
@@ -63,7 +114,9 @@ const dedupeSkills = (skills) => {
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
-  const { skills, loading: skillsLoading, initialized, fetchSkills } = useSkills();
+  const { skills, loading: skillsLoading, initialized } = useSkills();
+  const [apiSkills, setApiSkills] = useState([]);
+  const [apiSkillsLoading, setApiSkillsLoading] = useState(false);
   const [completedToday, setCompletedToday] = useState({});
   const [skillTimers, setSkillTimers] = useState(() => loadSkillTimers()); // { [skillId]: { status, elapsedMs, durationMs, startedAt?, skillName, skillId } }
   const [currentRunningId, setCurrentRunningId] = useState(null);
@@ -79,39 +132,29 @@ const Dashboard = () => {
     }
   };
 
-  const ensureDefaults = async () => {
-    if (!user) return false;
-    const seedKey = `defaultsSeeded:${user.uid}`;
-    const alreadySeeded = localStorage.getItem(seedKey) === "1";
-    if (alreadySeeded) return false;
-    const q = query(collection(db, "users", user.uid, "skills"));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      localStorage.setItem(seedKey, "1");
-      return false;
+  const loadStudentSkills = async () => {
+    if (!user) return;
+    setApiSkillsLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const headers = {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        "x-student-session": JSON.stringify({ uid: user.uid, email: user.email || "", role: "student" }),
+      };
+      const data = await requestWithFallback("/api/student/skills", { headers });
+      const normalized = dedupeSkills((data?.items || []).map((item, idx) => normalizeApiSkill(item, idx)));
+      setApiSkills(normalized);
+      setError("");
+    } catch (err) {
+      setApiSkills([]);
+    } finally {
+      setApiSkillsLoading(false);
     }
-    for (const skill of DEFAULT_SKILLS) {
-      const ref = await addDoc(collection(db, "users", user.uid, "skills"), {
-        userId: user.uid,
-        skillName: skill.name,
-        defaultDuration: skill.defaultDuration || 30,
-        skillWebsites: skill.websites || [],
-        createdAt: serverTimestamp(),
-      });
-      for (const activity of skill.activities) {
-        await addDoc(collection(db, "users", user.uid, "activities"), {
-          userId: user.uid,
-          skillId: ref.id,
-          skillName: skill.name,
-          activityName: activity,
-          defaultDuration: skill.defaultDuration || 30,
-          createdAt: serverTimestamp(),
-        });
-      }
-    }
-    localStorage.setItem(seedKey, "1");
-    return true;
   };
+
+  const fallbackSkills = Array.isArray(skills) ? dedupeSkills(skills) : [];
+  const safeSkills = apiSkills.length > 0 ? apiSkills : fallbackSkills;
 
   const loadCompletions = async () => {
     if (!user) return;
@@ -135,12 +178,7 @@ const Dashboard = () => {
     let mounted = true;
     const hydrate = async () => {
       try {
-        // Load skills and completions in parallel; only seed defaults if truly empty
-        const [loadedSkills] = await Promise.all([fetchSkills(true), loadCompletions()]);
-        const seeded = Array.isArray(loadedSkills) && loadedSkills.length > 0 ? false : await ensureDefaults();
-        if (seeded) {
-          await fetchSkills(true);
-        }
+        await Promise.all([loadCompletions(), loadStudentSkills()]);
         if (mounted) setError("");
       } catch (err) {
         console.error("Dashboard hydrate failed", err);
@@ -151,7 +189,7 @@ const Dashboard = () => {
     return () => {
       mounted = false;
     };
-  }, [user, fetchSkills]);
+  }, [user]);
 
   useEffect(() => {
     const justAdded = sessionStorage.getItem("skillJustAdded");
@@ -209,10 +247,10 @@ const Dashboard = () => {
   }, [completedToday]);
 
   useEffect(() => {
-    if (!Array.isArray(skills) || skills.length === 0) return;
+    if (!Array.isArray(safeSkills) || safeSkills.length === 0) return;
     setSkillTimers((prev) => {
       const next = {};
-      skills.forEach((skill) => {
+      safeSkills.forEach((skill) => {
         const existing = prev[skill.id];
         const durationMs = getDurationMs(skill);
         const defaultStatus = completedToday[skill.skillName] ? "completed" : "idle";
@@ -230,7 +268,7 @@ const Dashboard = () => {
       });
       return next;
     });
-  }, [skills, completedToday]);
+  }, [safeSkills, completedToday]);
 
   const pauseSkill = (skillId) => {
     if (!skillId) return;
@@ -267,7 +305,7 @@ const Dashboard = () => {
         createdAt: serverTimestamp(),
       });
       setCompletedToday((prev) => ({ ...prev, [entry.skillName]: true }));
-      updateAttendanceRecord(user.uid, skills).catch(() => {});
+      updateAttendanceRecord(user.uid, safeSkills).catch(() => {});
     } catch (err) {
       console.error("Failed to save skill completion", err);
     }
@@ -329,16 +367,7 @@ const Dashboard = () => {
     startSkill(skill);
   };
 
-  const isLoading = skillsLoading || !initialized;
-  const safeSkills = Array.isArray(skills) ? skills : [];
-  const debugStatus = {
-    user: user?.uid || "anonymous",
-    skillsCount: safeSkills.length,
-    skillsLoading,
-    initialized,
-    timersTracked: Object.keys(skillTimers || {}).length,
-    completedToday: Object.keys(completedToday || {}).length,
-  };
+  const isLoading = (apiSkillsLoading || skillsLoading || !initialized) && safeSkills.length === 0;
 
   return (
     <GlobalLayout>

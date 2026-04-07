@@ -1,0 +1,43 @@
+{
+  "courses": [
+    {
+      "id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+      "title": "Leetcode Practice",
+      "course_name": "Leetcode Practice",
+      "category": "learning",
+      "customCategory": "",
+      "description": "solve leetcode",
+      "startDate": "2026-04-05",
+      "endDate": "2026-04-06",
+      "durationDays": 1,
+      "difficulty": "Beginner",
+      "links": [
+        {
+          "url": "https://leetcode.com/problemset/",
+          "type": "coding"
+        }
+      ],
+      "websiteRef": "",
+      "status": "Active",
+      "createdAt": "2026-04-05T12:37:49.742Z",
+      "updatedAt": "2026-04-05T12:37:49.743Z"
+    },
+    {
+      "id": "1118ee0f-0708-4eeb-9d75-a761fe9143d6",
+      "title": "problem solving",
+      "course_name": "problem solving",
+      "category": "problem-solving",
+      "customCategory": "",
+      "description": "solve leetcode",
+      "startDate": "2026-04-05",
+      "endDate": "2026-04-06",
+      "durationDays": 1,
+      "difficulty": "Beginner",
+      "links": [],
+      "websiteRef": "",
+      "status": "Active",
+      "createdAt": "2026-04-05T12:38:14.900Z",
+      "updatedAt": "2026-04-05T12:38:14.900Z"
+    }
+  ]
+}

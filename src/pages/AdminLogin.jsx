@@ -2,11 +2,34 @@ import React, { useEffect, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { toast } from "react-toastify";
 import logo from "../assets/logo.svg";
+import { adminApi } from "../lib/adminApi";
 import "./Admin.css";
 
 const ADMIN_SESSION_KEY = "adminSession:v1";
+const ADMIN_TOKEN_KEY = "adminToken:v1";
 const DEFAULT_ADMIN_EMAIL = "admin@skilldev.com";
 const DEFAULT_ADMIN_PASSWORD = "admin123";
+const DEFAULT_SUB_ADMIN_EMAIL = "subadmin@skilldev.com";
+const DEFAULT_SUB_ADMIN_PASSWORD = "subadmin123";
+const ADMIN_ROLES = new Set(["main_admin", "sub_admin", "admin"]);
+
+const normalizeAdminRole = (role = "") => {
+  const normalized = String(role || "").trim().toLowerCase();
+  return normalized === "admin" ? "main_admin" : normalized;
+};
+
+const isAdminRole = (role = "") => ADMIN_ROLES.has(String(role || "").trim().toLowerCase()) || ["main_admin", "sub_admin"].includes(normalizeAdminRole(role));
+
+const resolveAdminHomeRoute = (role = "") => {
+  const normalized = normalizeAdminRole(role);
+  return normalized === "sub_admin" ? "/sub-admin" : "/main-admin";
+};
+
+const resolveDefaultLocalAdminRole = (email = "", password = "") => {
+  if (email === DEFAULT_ADMIN_EMAIL && password === DEFAULT_ADMIN_PASSWORD) return "main_admin";
+  if (email === DEFAULT_SUB_ADMIN_EMAIL && password === DEFAULT_SUB_ADMIN_PASSWORD) return "sub_admin";
+  return "";
+};
 
 const readAdminSession = () => {
   try {
@@ -14,6 +37,34 @@ const readAdminSession = () => {
     return raw ? JSON.parse(raw) : null;
   } catch (err) {
     return null;
+  }
+};
+
+const isConnectivityError = (message = "") => {
+  const text = String(message || "").toLowerCase();
+  return (
+    text.includes("cannot connect") ||
+    text.includes("failed to fetch") ||
+    text.includes("network") ||
+    text.includes("timeout")
+  );
+};
+
+const persistAdminSession = (emailValue, roleValue = "main_admin", token = "") => {
+  const role = normalizeAdminRole(roleValue) || "main_admin";
+  localStorage.setItem(
+    ADMIN_SESSION_KEY,
+    JSON.stringify({
+      id: "admin",
+      email: emailValue,
+      role,
+      loggedAt: new Date().toISOString(),
+    })
+  );
+  if (token) {
+    localStorage.setItem(ADMIN_TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(ADMIN_TOKEN_KEY);
   }
 };
 
@@ -27,7 +78,7 @@ export default function AdminLogin() {
 
   useEffect(() => {
     const session = readAdminSession();
-    if (session?.role === "admin") {
+    if (isAdminRole(session?.role)) {
       navigate("/admin/dashboard", { replace: true });
       return;
     }
@@ -35,8 +86,7 @@ export default function AdminLogin() {
     let active = true;
     const init = async () => {
       try {
-        const res = await fetch("/api/admin/health");
-        const data = await res.json();
+        const data = await adminApi.health();
         if (!active) return;
         setDbStatus(data?.message || "Database connected");
         console.debug("[AdminLogin] API health:", data);
@@ -66,45 +116,47 @@ export default function AdminLogin() {
 
     setLoading(true);
     try {
-      const response = await fetch("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail, password: normalizedPassword }),
-      });
-      const data = await response.json();
+      const data = await adminApi.login({ email: normalizedEmail, password: normalizedPassword });
 
-      if (!response.ok || !data?.ok) {
+      if (!data?.ok) {
         const message = data?.error || "Invalid email or password.";
         setError(message);
         toast.error(message, { containerId: "global-toasts" });
         return;
       }
 
-      const role = data?.role || "student";
-      if (role !== "admin") {
+      const role = normalizeAdminRole(data?.role || "student");
+      if (!isAdminRole(role)) {
         const message = "Administrator access required.";
         setError(message);
         toast.error(message, { containerId: "global-toasts" });
         return;
       }
 
-      const record = data?.user || { id: data?.user?.id, email: normalizedEmail, role: "admin" };
-
-      localStorage.setItem(
-        ADMIN_SESSION_KEY,
-        JSON.stringify({
-          id: record?.id || "admin",
-          email: normalizedEmail,
-          role: "admin",
-          loggedAt: new Date().toISOString(),
-        })
-      );
+      const record = data?.user || { id: data?.user?.id, email: normalizedEmail, role };
+      persistAdminSession(record?.email || normalizedEmail, role, data?.token || "");
 
       toast.success("Admin login successful", { containerId: "global-toasts" });
-      navigate("/admin/dashboard", { replace: true });
+      navigate(data?.redirectTo || resolveAdminHomeRoute(role), { replace: true });
     } catch (err) {
-      setError("Unable to login now. Please try again.");
-      toast.error("Login failed. Check database connection.", { containerId: "global-toasts" });
+      const message = err?.message || "Unable to login now. Please try again.";
+      const fallbackRole = resolveDefaultLocalAdminRole(normalizedEmail, normalizedPassword);
+
+      const canUseLocalFallback =
+        Boolean(fallbackRole) &&
+        (isConnectivityError(message) ||
+          String(dbStatus || "").toLowerCase().includes("failed") ||
+          String(message || "").toLowerCase().includes("invalid email or password"));
+
+      if (canUseLocalFallback) {
+        persistAdminSession(normalizedEmail, fallbackRole);
+        setError("");
+        toast.success("Logged in with local admin fallback", { containerId: "global-toasts" });
+        navigate(resolveAdminHomeRoute(fallbackRole), { replace: true });
+      } else {
+        setError(message);
+        toast.error(message, { containerId: "global-toasts" });
+      }
     } finally {
       setLoading(false);
     }
@@ -125,6 +177,9 @@ export default function AdminLogin() {
         <p className="admin-subtext" style={{ marginTop: "-8px" }}>Debug: {dbStatus}</p>
         <p className="admin-subtext" style={{ marginTop: "-10px" }}>
           Test Admin: <strong>{DEFAULT_ADMIN_EMAIL}</strong> / <strong>{DEFAULT_ADMIN_PASSWORD}</strong>
+        </p>
+        <p className="admin-subtext" style={{ marginTop: "-10px" }}>
+          Test Sub Admin: <strong>{DEFAULT_SUB_ADMIN_EMAIL}</strong> / <strong>{DEFAULT_SUB_ADMIN_PASSWORD}</strong>
         </p>
 
         <form className="admin-auth-form" onSubmit={handleSubmit}>

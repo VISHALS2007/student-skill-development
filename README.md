@@ -1,16 +1,40 @@
-# React + Vite
+# Student Skill Development App
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Web application for student learning, focus tracking, and administrator-managed course workflows.
 
-Currently, two official plugins are available:
+## Core Modules
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Student authentication and learning dashboard
+- Focus tracking and progress analytics
+- Role-based access (student and admin)
+- Admin course, assignment, attendance, and reporting module
 
-## React Compiler
+## Key Documentation
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- [ADMIN_WORKFLOW.md](ADMIN_WORKFLOW.md)
+- [STUDENT_WORKFLOW.md](STUDENT_WORKFLOW.md)
+- [ADMIN_MODULE.md](ADMIN_MODULE.md)
+- [ROLE_PERMISSIONS.md](ROLE_PERMISSIONS.md)
+- [ROLE_BASED_AUTH.md](ROLE_BASED_AUTH.md)
+- [BACKEND_STRUCTURE.md](BACKEND_STRUCTURE.md)
 
-## Expanding the ESLint configuration
+## Run Frontend
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+```bash
+npm install
+npm run dev
+```
+
+## Run Backend
+
+```bash
+cd server
+npm install
+npm run dev
+```
+
+## Build Frontend
+
+```bash
+npm run build
+```

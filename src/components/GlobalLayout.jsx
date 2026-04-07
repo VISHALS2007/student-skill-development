@@ -26,21 +26,18 @@ const GlobalLayout = ({
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  const backgroundClass =
-    resolvedTheme === "dark"
-      ? "bg-gradient-to-b from-slate-900 via-slate-900 to-slate-950"
-      : "bg-gradient-to-b from-[#f8fafc] via-[#eef2f7] to-[#e2e8f0]";
+  const backgroundClass = resolvedTheme === "dark" ? "bg-slate-950" : "bg-transparent";
 
   return (
-    <div className={`min-h-screen ${backgroundClass} px-4 sm:px-6 py-6 sm:py-8`}>
-      <div className="relative max-w-7xl mx-auto flex lg:flex-row flex-col gap-6 lg:gap-8">
+    <div className={`ui-shell min-h-screen ${backgroundClass} px-4 lg:px-6 py-6`}>
+      <div className="ui-page relative max-w-7xl mx-auto flex lg:flex-row flex-col items-start gap-6">
         <div className="hidden lg:block w-64 shrink-0">
           <Sidebar />
         </div>
 
         <Sidebar isMobile isOpen={isMobileMenuOpen} onClose={() => setIsMobileMenuOpen(false)} />
 
-        <div className="flex-1 flex flex-col gap-6 lg:gap-8">
+        <div className="ui-main flex-1 w-full min-w-0 flex flex-col gap-6">
           <Header
             onMenuToggle={() => setIsMobileMenuOpen((open) => !open)}
             isMenuOpen={isMobileMenuOpen}
@@ -54,7 +51,7 @@ const GlobalLayout = ({
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.25, ease: "easeOut" }}
-            className="space-y-6 sm:space-y-8"
+            className="w-full min-w-0 space-y-6"
           >
             {children}
           </motion.main>

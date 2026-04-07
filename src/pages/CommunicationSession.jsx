@@ -4,7 +4,6 @@ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "../lib/AuthContext";
 import { db } from "../firebase";
 import "../styles/CommunicationSession.css";
-import { updateAttendanceRecord } from "../services/attendanceService";
 
 const TOPICS = [
   "Introduce yourself",
@@ -60,30 +59,11 @@ const CommunicationSession = () => {
   const [remainingTime, setRemainingTime] = useState(durationMinutes * 60);
   const [topic, setTopic] = useState("");
   const [isPaused, setIsPaused] = useState(false);
-  const [error, setError] = useState("");
-  const [hasStarted, setHasStarted] = useState(false);
-  const [isStarting, setIsStarting] = useState(false);
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const intervalRef = useRef(null);
   const finishedRef = useRef(false);
   const pausedRef = useRef(false);
-  const autoStartRef = useRef(false);
-  const restartingCamRef = useRef(false);
-  const startedRef = useRef(false);
-
-  const attachTrackGuards = (stream) => {
-    if (!stream) return;
-    stream.getTracks().forEach((track) => {
-      track.onended = async () => {
-        if (finishedRef.current) return;
-        if (restartingCamRef.current) return;
-        restartingCamRef.current = true;
-        await startCamera();
-        restartingCamRef.current = false;
-      };
-    });
-  };
 
   const formatTime = (totalSeconds) => {
     const m = Math.floor(totalSeconds / 60);
@@ -101,12 +81,6 @@ const CommunicationSession = () => {
     }
   };
 
-  const exitFullscreen = () => {
-    if (document.fullscreenElement) {
-      document.exitFullscreen().catch(() => {});
-    }
-  };
-
   const saveCompletion = async () => {
     if (!user) return;
     const today = new Date().toISOString().split("T")[0];
@@ -120,13 +94,6 @@ const CommunicationSession = () => {
         status: "completed",
         createdAt: serverTimestamp(),
       });
-      await addDoc(collection(db, "users", user.uid, "dailyTasks"), {
-        taskName: sessionInfo?.taskName || "communication",
-        durationMinutes,
-        date: today,
-        status: "completed",
-        createdAt: serverTimestamp(),
-      });
     } catch (err) {
       console.error("Failed to save communication session", err);
     }
@@ -135,32 +102,18 @@ const CommunicationSession = () => {
   const completeSession = async () => {
     if (finishedRef.current) return;
     finishedRef.current = true;
-    startedRef.current = false;
     stopCamera();
-    exitFullscreen();
     sessionStorage.removeItem("commSessionInfo");
     clearInterval(intervalRef.current);
     await saveCompletion();
-    updateAttendanceRecord(user?.uid).catch(() => {});
     navigate("/dashboard", { replace: true });
-  };
-
-  const requestFullscreen = async () => {
-    const target = document.documentElement;
-    if (!target.requestFullscreen) return true;
-    try {
-      await target.requestFullscreen();
-      return true;
-    } catch (err) {
-      console.error("Fullscreen failed", err);
-      return false;
-    }
   };
 
   const startCamera = async () => {
     if (!navigator?.mediaDevices) {
-      setError("Camera access is required for communication practice.");
-      return false;
+      alert("Camera not supported on this device.");
+      navigate("/dashboard", { replace: true });
+      return;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
@@ -169,75 +122,17 @@ const CommunicationSession = () => {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
-      attachTrackGuards(stream);
-      return true;
     } catch (err) {
       console.error("Unable to start camera", err);
-      setError("Camera access is required for communication practice.");
-      return false;
+      alert("Unable to access camera. Please check permissions.");
+      navigate("/dashboard", { replace: true });
     }
   };
 
   useEffect(() => {
     sessionStorage.setItem("commSessionInfo", JSON.stringify(sessionInfo));
-
-    const handleVisibility = () => {
-      if (!startedRef.current) return;
-      if (document.hidden) {
-        pausedRef.current = true;
-        setIsPaused(true);
-      } else {
-        pausedRef.current = false;
-        setIsPaused(false);
-      }
-    };
-
-    document.addEventListener("visibilitychange", handleVisibility);
-
-    return () => {
-      document.removeEventListener("visibilitychange", handleVisibility);
-      clearInterval(intervalRef.current);
-      stopCamera();
-      exitFullscreen();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleExit = () => {
-    startedRef.current = false;
-    stopCamera();
-    exitFullscreen();
-    sessionStorage.removeItem("commSessionInfo");
-    clearInterval(intervalRef.current);
-    navigate("/dashboard", { replace: true });
-  };
-
-  const startCommunicationSession = async () => {
-    setError("");
-    setIsStarting(true);
-    finishedRef.current = false;
-    startedRef.current = true;
-    const nextTopic = TOPICS[Math.floor(Math.random() * TOPICS.length)];
-    setTopic(nextTopic);
-    const camOk = await startCamera();
-    if (!camOk) {
-      setIsStarting(false);
-      setHasStarted(false);
-      exitFullscreen();
-      return;
-    }
-    const fsOk = await requestFullscreen();
-    if (!fsOk) {
-      stopCamera();
-      setIsStarting(false);
-      setHasStarted(false);
-      return;
-    }
-    setHasStarted(true);
-    pausedRef.current = false;
-    setIsPaused(false);
-    setRemainingTime(durationMinutes * 60);
-    clearInterval(intervalRef.current);
+    setTopic(TOPICS[Math.floor(Math.random() * TOPICS.length)]);
+    startCamera();
     intervalRef.current = setInterval(() => {
       setRemainingTime((prev) => {
         if (pausedRef.current) return prev;
@@ -249,7 +144,19 @@ const CommunicationSession = () => {
         return prev - 1;
       });
     }, 1000);
-    setIsStarting(false);
+
+    return () => {
+      clearInterval(intervalRef.current);
+      stopCamera();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleExit = () => {
+    stopCamera();
+    sessionStorage.removeItem("commSessionInfo");
+    clearInterval(intervalRef.current);
+    navigate("/dashboard", { replace: true });
   };
 
   const handlePause = () => {
@@ -261,60 +168,40 @@ const CommunicationSession = () => {
     setIsPaused(false);
   };
 
-  useEffect(() => {
-    if (state?.autoStart && !hasStarted && !isStarting && !autoStartRef.current) {
-      autoStartRef.current = true;
-      startCommunicationSession();
-    }
-  }, [state, hasStarted, isStarting]);
-
-  useEffect(() => {
-    const checkCamera = async () => {
-      if (!hasStarted || finishedRef.current) return;
-      const tracks = streamRef.current?.getTracks() || [];
-      const ended = tracks.length === 0 || tracks.every((t) => t.readyState === "ended");
-      if (ended && !restartingCamRef.current) {
-        restartingCamRef.current = true;
-        await startCamera();
-        restartingCamRef.current = false;
-      }
-    };
-    const t = setInterval(checkCamera, 3000);
-    return () => clearInterval(t);
-  }, [hasStarted]);
-
   return (
-    <div className="comm-fullshell">
-      <video ref={videoRef} autoPlay playsInline muted className="comm-video-full" />
-      <div className="comm-overlay-top">
-        <div className="comm-pill">Communication Practice</div>
-        <div className="comm-topic-text">
-          <span className="comm-topic-label">Topic:</span> {topic || "Tap start to generate"}
+    <div className="communication-shell">
+      <div className="comm-card">
+        <div className="comm-header">
+          <div>
+            <p className="comm-eyebrow">Communication Practice</p>
+            <h1 className="comm-title">Improve speaking with camera + prompts</h1>
+          </div>
+          <div className="comm-timer">{formatTime(remainingTime)}</div>
         </div>
-        <button className="topic-refresh" onClick={() => setTopic(TOPICS[Math.floor(Math.random() * TOPICS.length)])} disabled={!hasStarted}>
-          New topic
-        </button>
-      </div>
-      <div className="comm-overlay-bottom">
-        <div className="comm-timer-large">{formatTime(remainingTime)}</div>
-        <div className="comm-actions-inline">
-          {!hasStarted ? (
-            <button className="comm-btn primary" onClick={startCommunicationSession} disabled={isStarting}>
-              {isStarting ? "Starting..." : "Start"}
+
+        <div className="comm-topic">
+          <div className="topic-label">Speak about</div>
+          <div className="topic-row">
+            <p className="topic-text">{topic}</p>
+            <button className="topic-refresh" onClick={() => setTopic(TOPICS[Math.floor(Math.random() * TOPICS.length)])}>
+              New topic
             </button>
+          </div>
+        </div>
+
+        <div className="comm-video-wrap">
+          <video ref={videoRef} autoPlay playsInline className="comm-video" muted />
+        </div>
+
+        <div className="comm-actions">
+          <button className="comm-btn secondary" onClick={handleExit}>Stop</button>
+          {isPaused ? (
+            <button className="comm-btn primary" onClick={handleResume}>Resume</button>
           ) : (
-            <>
-              <button className="comm-btn secondary" onClick={handleExit}>Stop</button>
-              {isPaused ? (
-                <button className="comm-btn primary" onClick={handleResume}>Resume</button>
-              ) : (
-                <button className="comm-btn primary" onClick={handlePause}>Pause</button>
-              )}
-            </>
+            <button className="comm-btn primary" onClick={handlePause}>Pause</button>
           )}
         </div>
       </div>
-      {error && <div className="comm-error">{error}</div>}
     </div>
   );
 };

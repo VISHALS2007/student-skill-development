@@ -1,6 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { addDoc, collection, deleteDoc, doc, getDocs, onSnapshot, orderBy, query, serverTimestamp, updateDoc } from "firebase/firestore";
-import { toast } from "react-toastify";
 import { db } from "../firebase";
 import { updateAttendanceRecord } from "../services/attendanceService";
 import { useAuth } from "./AuthContext";
@@ -130,7 +129,6 @@ export const SkillsProvider = ({ children }) => {
       });
       // background refresh to sync with backend without blocking UI
       fetchSkills(true).catch(() => {});
-      toast.success("Skill registered successfully", { autoClose: 3000, containerId: "global-toasts" });
       return optimistic;
     },
     [user, fetchSkills, recomputeAttendance]
@@ -147,7 +145,6 @@ export const SkillsProvider = ({ children }) => {
         return next;
       });
       fetchSkills(true).catch(() => {});
-      toast.success("Skill updated successfully", { autoClose: 3000, containerId: "global-toasts" });
     },
     [user, fetchSkills, recomputeAttendance]
   );
@@ -164,7 +161,6 @@ export const SkillsProvider = ({ children }) => {
       });
       clearCache();
       await fetchSkills(true).catch(() => {});
-      toast.success("Skill removed successfully", { autoClose: 3000, containerId: "global-toasts" });
     },
     [user, fetchSkills, recomputeAttendance]
   );

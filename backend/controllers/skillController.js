@@ -30,6 +30,30 @@ const DEFAULT_SKILLS = [
 
 const normalizeName = (name = "") => name.trim().toLowerCase();
 
+const SKILLS_CACHE_TTL_MS = Number(process.env.SKILLS_CACHE_TTL_MS || 60000);
+const skillsCache = new Map();
+
+const cacheGet = (key) => {
+  const cached = skillsCache.get(key);
+  if (!cached) return null;
+  if (Date.now() > cached.expiresAt) {
+    skillsCache.delete(key);
+    return null;
+  }
+  return cached.value;
+};
+
+const cacheSet = (key, value, ttlMs = SKILLS_CACHE_TTL_MS) => {
+  skillsCache.set(key, {
+    value,
+    expiresAt: Date.now() + Math.max(1, Number(ttlMs) || 1),
+  });
+};
+
+const clearSkillsCache = () => {
+  skillsCache.clear();
+};
+
 export const seedDefaults = async () => {
   const count = await Skill.countDocuments();
   if (count > 0) return;
@@ -38,8 +62,37 @@ export const seedDefaults = async () => {
 };
 
 export const getSkills = async (req, res) => {
-  const skills = await Skill.find().sort({ createdAt: -1 });
-  res.json(skills);
+  const search = String(req.query?.search || "").trim();
+  const page = Math.max(parseInt(req.query?.page, 10) || 1, 1);
+  const pageSize = Math.min(Math.max(parseInt(req.query?.pageSize, 10) || 10, 1), 100);
+  const useLegacyShape = !req.query?.page && !req.query?.pageSize && !search;
+
+  const cacheKey = `skills::${search.toLowerCase()}::${page}::${pageSize}`;
+  const cached = cacheGet(cacheKey);
+  if (cached) {
+    return res.json(useLegacyShape ? cached.items : cached);
+  }
+
+  const query = search ? { skillName: { $regex: search, $options: "i" } } : {};
+  const [total, items] = await Promise.all([
+    Skill.countDocuments(query),
+    Skill.find(query)
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * pageSize)
+      .limit(pageSize)
+      .lean(),
+  ]);
+
+  const payload = {
+    items,
+    total,
+    page,
+    pageSize,
+    hasMore: page * pageSize < total,
+  };
+
+  cacheSet(cacheKey, payload);
+  return res.json(useLegacyShape ? items : payload);
 };
 
 export const addSkill = async (req, res) => {
@@ -55,6 +108,7 @@ export const addSkill = async (req, res) => {
     extraWebsites,
     defaultWebsites,
   });
+  clearSkillsCache();
   res.status(201).json(skill);
 };
 
@@ -68,6 +122,7 @@ export const updateSkill = async (req, res) => {
 
   const skill = await Skill.findByIdAndUpdate(id, updates, { new: true });
   if (!skill) return res.status(404).json({ message: "Skill not found" });
+  clearSkillsCache();
   res.json(skill);
 };
 
@@ -75,6 +130,7 @@ export const deleteSkill = async (req, res) => {
   const { id } = req.params;
   const deleted = await Skill.findByIdAndDelete(id);
   if (!deleted) return res.status(404).json({ message: "Skill not found" });
+  clearSkillsCache();
   res.json({ message: "Skill deleted" });
 };
 
@@ -87,5 +143,6 @@ export const updateTimer = async (req, res) => {
 
   const skill = await Skill.findByIdAndUpdate(id, updates, { new: true });
   if (!skill) return res.status(404).json({ message: "Skill not found" });
+  clearSkillsCache();
   res.json(skill);
 };

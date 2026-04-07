@@ -9,6 +9,7 @@ import AppErrorBoundary from './components/AppErrorBoundary.jsx'
 import AppCrashOverlay from './components/AppCrashOverlay.jsx'
 import 'react-toastify/dist/ReactToastify.css'
 import './index.css'
+import './styles/ProfessionalUI.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>

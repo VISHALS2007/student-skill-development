@@ -2,7 +2,14 @@ import { auth } from "../firebase";
 
 const ADMIN_SESSION_KEY = "adminSession:v1";
 const ADMIN_TOKEN_KEY = "adminToken:v1";
-const ADMIN_API_BASES = ["/api/admin", "http://localhost:4000/api/admin", "http://localhost:5000/api/admin"];
+const configuredApiBase = String(import.meta.env.VITE_API_BASE || "").trim().replace(/\/$/, "");
+const configuredAdminBase = (() => {
+  if (!configuredApiBase) return "";
+  if (/\/api\/admin$/i.test(configuredApiBase)) return configuredApiBase;
+  if (/\/api$/i.test(configuredApiBase)) return `${configuredApiBase}/admin`;
+  return `${configuredApiBase}/api/admin`;
+})();
+const ADMIN_API_BASES = Array.from(new Set(["/api/admin", configuredAdminBase, "http://localhost:4000/api/admin", "http://localhost:5000/api/admin"].filter(Boolean)));
 const DASHBOARD_CACHE_TTL_MS = 30000;
 const COURSES_CACHE_TTL_MS = 60000;
 const STUDENTS_CACHE_TTL_MS = 30000;

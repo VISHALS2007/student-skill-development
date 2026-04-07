@@ -13,8 +13,19 @@ loadEnv();
 
 const app = express();
 const port = process.env.PORT || 4000;
+const corsOriginsRaw = String(process.env.CORS_ORIGIN || "").trim();
+const corsOrigin = (() => {
+  if (!corsOriginsRaw) return true;
+  const parsed = corsOriginsRaw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (parsed.length === 0) return true;
+  if (parsed.length === 1) return parsed[0];
+  return parsed;
+})();
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || true }));
+app.use(cors({ origin: corsOrigin }));
 app.use(compression());
 app.use(express.json());
 

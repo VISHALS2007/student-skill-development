@@ -133,7 +133,12 @@ const SkillSystem = () => {
     try {
       const headers = await getAuthHeaders();
       const data = await requestWithFallback("/api/student/skills", { headers });
-      setApiSkills(data.items || []);
+      const items = (data.items || []).map((item) => ({
+        ...item,
+        defaultDuration: Number(item?.defaultDuration) || 30,
+        skillWebsites: Array.isArray(item?.skillWebsites) ? item.skillWebsites : [],
+      }));
+      setApiSkills(items);
     } catch (err) {
       console.error("Failed to load student skills", err);
       setApiSkills([]);
@@ -340,7 +345,12 @@ const SkillSystem = () => {
         await requestWithFallback(`/api/student/skills/${editingSkillId}`, {
           method: "PUT",
           headers,
-          body: JSON.stringify({ title: skillName, description: "" }),
+          body: JSON.stringify({
+            title: skillName,
+            description: "",
+            defaultDuration: Number(skillForm.duration) || 30,
+            skillWebsites: cleanedSites,
+          }),
         });
         await loadStudentSkills();
         notify("success", "Skill updated successfully");
@@ -349,7 +359,12 @@ const SkillSystem = () => {
         await requestWithFallback("/api/student/skills", {
           method: "POST",
           headers,
-          body: JSON.stringify({ title: skillName, description: "" }),
+          body: JSON.stringify({
+            title: skillName,
+            description: "",
+            defaultDuration: Number(skillForm.duration) || 30,
+            skillWebsites: cleanedSites,
+          }),
         });
         await loadStudentSkills();
         sessionStorage.setItem("skillJustAdded", skillName);
@@ -839,6 +854,7 @@ const SkillSystem = () => {
                 {allocatedSkills.map((skill) => (
                   <div key={skill.id} className="rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 shadow-sm">
                     <p className="font-semibold text-slate-900 truncate">{skill.title || skill.skillName}</p>
+                    <p className="text-xs text-slate-500 mt-1">Timer: {Number(skill.defaultDuration) || 30} min</p>
                     <p className="text-xs text-slate-500 mt-1">Read-only (allocated by admin)</p>
                   </div>
                 ))}
@@ -863,6 +879,7 @@ const SkillSystem = () => {
                     <div className="flex-1 min-w-0">
                       <div>
                         <p className="font-semibold text-slate-900 truncate">{skill.title || skill.skillName}</p>
+                        <p className="text-xs text-slate-500 mt-1">Timer: {Number(skill.defaultDuration) || 30} min</p>
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2 text-xs items-center justify-end">

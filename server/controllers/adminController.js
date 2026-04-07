@@ -164,6 +164,18 @@ const toEpoch = (value) => {
 };
 
 const dedupeUsersByEmail = (users = []) => {
+  const userScore = (u) =>
+    (u?.enabled !== false ? 4 : 0) +
+    (String(u?.name || "").trim() ? 2 : 0) +
+    (toEpoch(u?.updatedAt || u?.createdAt) > 0 ? 1 : 0);
+
+  const pickPreferredUser = (a, b) => {
+    const scoreA = userScore(a);
+    const scoreB = userScore(b);
+    if (scoreA !== scoreB) return scoreB > scoreA ? b : a;
+    return toEpoch(b?.updatedAt || b?.createdAt) >= toEpoch(a?.updatedAt || a?.createdAt) ? b : a;
+  };
+
   const byEmail = new Map();
   const noEmail = [];
 
@@ -180,23 +192,27 @@ const dedupeUsersByEmail = (users = []) => {
       return;
     }
 
-    const score = (u) =>
-      (u?.enabled !== false ? 4 : 0) +
-      (String(u?.name || "").trim() ? 2 : 0) +
-      (toEpoch(u?.updatedAt || u?.createdAt) > 0 ? 1 : 0);
-
-    const candidate = score(user) > score(existing)
-      ? user
-      : score(user) < score(existing)
-      ? existing
-      : toEpoch(user?.updatedAt || user?.createdAt) >= toEpoch(existing?.updatedAt || existing?.createdAt)
-      ? user
-      : existing;
-
-    byEmail.set(email, candidate);
+    byEmail.set(email, pickPreferredUser(existing, user));
   });
 
-  return [...byEmail.values(), ...noEmail];
+  const byId = new Map();
+  [...byEmail.values(), ...noEmail].forEach((user) => {
+    const id = String(user?.id || "").trim();
+    if (!id) {
+      byId.set(`no-id:${byId.size}`, user);
+      return;
+    }
+
+    const existing = byId.get(id);
+    if (!existing) {
+      byId.set(id, user);
+      return;
+    }
+
+    byId.set(id, pickPreferredUser(existing, user));
+  });
+
+  return [...byId.values()];
 };
 
 const courseDoc = (courseId) => firestore.collection(COURSES).doc(courseId);

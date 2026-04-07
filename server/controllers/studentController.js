@@ -112,6 +112,36 @@ const toEpoch = (value) => {
   return Number.isNaN(ts) ? 0 : ts;
 };
 
+const normalizeDurationMinutes = (value, fallback = 30) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(240, Math.max(1, Math.round(n)));
+};
+
+const normalizeSkillWebsites = (value) => {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((entry) => {
+      if (typeof entry === "string") {
+        const url = entry.trim();
+        if (!url) return null;
+        return { label: url.replace(/https?:\/\//i, ""), url };
+      }
+
+      const label = String(entry?.label || "").trim();
+      const url = String(entry?.url || "").trim();
+      if (!label && !url) return null;
+      return { label, url };
+    })
+    .filter(Boolean);
+};
+
+const normalizeSkillItem = (item = {}) => ({
+  ...item,
+  defaultDuration: normalizeDurationMinutes(item.defaultDuration, 30),
+  skillWebsites: normalizeSkillWebsites(item.skillWebsites),
+});
+
 export const getStudentDashboard = async (req, res) => {
   const userId = req.user.uid;
 
@@ -333,7 +363,7 @@ export const getStudentSkills = async (req, res) => {
     
     const items = [];
     skillsSnapshots.forEach((doc) => {
-      items.push({ id: doc.id, ...doc.data() });
+      items.push(normalizeSkillItem({ id: doc.id, ...doc.data() }));
     });
 
     res.json({ items });
@@ -341,7 +371,7 @@ export const getStudentSkills = async (req, res) => {
     const db = readLocalStudentDb();
     const bucket = getLocalStudentBucket(db, req.user.uid, req.user.email || "");
     writeLocalStudentDb(db);
-    res.json({ items: bucket.skills || [], source: "local-fallback" });
+    res.json({ items: (bucket.skills || []).map((item) => normalizeSkillItem(item)), source: "local-fallback" });
   }
 };
 
@@ -349,37 +379,56 @@ export const getStudentSkills = async (req, res) => {
 export const addStudentSkill = async (req, res) => {
   try {
     const userId = req.user.uid;
-    const { title, description } = req.body;
+    const { title, description, defaultDuration, skillWebsites } = req.body;
 
     if (!title) {
       return res.status(400).json({ error: "Skill title is required" });
     }
 
+    const nextDuration = normalizeDurationMinutes(defaultDuration, 30);
+    const nextWebsites = normalizeSkillWebsites(skillWebsites);
+
     const skillRef = await firestore.collection("user_skills").add({
       user_id: userId,
       title: title.trim(),
       description: description?.trim() || "",
+      defaultDuration: nextDuration,
+      skillWebsites: nextWebsites,
       addedBy: "student",
       createdAt: new Date(),
       updatedAt: new Date(),
     });
 
-    res.json({ item: { id: skillRef.id, user_id: userId, title, description, addedBy: "student" } });
+    res.json({
+      item: {
+        id: skillRef.id,
+        user_id: userId,
+        title,
+        description,
+        defaultDuration: nextDuration,
+        skillWebsites: nextWebsites,
+        addedBy: "student",
+      },
+    });
   } catch (err) {
     const db = readLocalStudentDb();
     const bucket = getLocalStudentBucket(db, req.user.uid, req.user.email || "");
+    const nextDuration = normalizeDurationMinutes(req.body?.defaultDuration, 30);
+    const nextWebsites = normalizeSkillWebsites(req.body?.skillWebsites);
     const item = {
       id: randomUUID(),
       user_id: req.user.uid,
       title: String(req.body?.title || "").trim(),
       description: String(req.body?.description || "").trim(),
+      defaultDuration: nextDuration,
+      skillWebsites: nextWebsites,
       addedBy: "student",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
     bucket.skills.push(item);
     writeLocalStudentDb(db);
-    res.json({ item, source: "local-fallback" });
+    res.json({ item: normalizeSkillItem(item), source: "local-fallback" });
   }
 };
 
@@ -388,11 +437,14 @@ export const updateStudentSkill = async (req, res) => {
   try {
     const userId = req.user.uid;
     const { skillId } = req.params;
-    const { title, description } = req.body;
+    const { title, description, defaultDuration, skillWebsites } = req.body;
 
     if (!title) {
       return res.status(400).json({ error: "Skill title is required" });
     }
+
+    const nextDuration = normalizeDurationMinutes(defaultDuration, 30);
+    const nextWebsites = normalizeSkillWebsites(skillWebsites);
 
     const skillDoc = await firestore.collection("user_skills").doc(skillId).get();
     if (!skillDoc.exists || skillDoc.data().user_id !== userId) {
@@ -407,24 +459,30 @@ export const updateStudentSkill = async (req, res) => {
     await firestore.collection("user_skills").doc(skillId).update({
       title: title.trim(),
       description: description?.trim() || "",
+      defaultDuration: nextDuration,
+      skillWebsites: nextWebsites,
       updatedAt: new Date(),
     });
 
-    res.json({ item: { id: skillId, title, description } });
+    res.json({ item: { id: skillId, title, description, defaultDuration: nextDuration, skillWebsites: nextWebsites } });
   } catch (err) {
     const db = readLocalStudentDb();
     const bucket = getLocalStudentBucket(db, req.user.uid, req.user.email || "");
     const idx = bucket.skills.findIndex((s) => s.id === req.params.skillId);
     if (idx === -1) return res.status(404).json({ error: "Skill not found" });
     if (bucket.skills[idx].addedBy === "admin") return res.status(403).json({ error: "Cannot edit admin-allocated skills" });
+    const nextDuration = normalizeDurationMinutes(req.body?.defaultDuration, bucket.skills[idx].defaultDuration || 30);
+    const nextWebsites = normalizeSkillWebsites(req.body?.skillWebsites);
     bucket.skills[idx] = {
       ...bucket.skills[idx],
       title: String(req.body?.title || "").trim(),
       description: String(req.body?.description || "").trim(),
+      defaultDuration: nextDuration,
+      skillWebsites: nextWebsites,
       updatedAt: new Date().toISOString(),
     };
     writeLocalStudentDb(db);
-    res.json({ item: bucket.skills[idx], source: "local-fallback" });
+    res.json({ item: normalizeSkillItem(bucket.skills[idx]), source: "local-fallback" });
   }
 };
 

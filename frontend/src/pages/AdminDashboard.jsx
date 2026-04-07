@@ -88,6 +88,27 @@ const normalizeTopPanelStatus = (value = "") => {
   return message;
 };
 
+const dedupeUsersForView = (items = []) => {
+  const map = new Map();
+  for (const item of items || []) {
+    const id = String(item?.id || "").trim();
+    const email = String(item?.email || "").trim().toLowerCase();
+    const key = id || (email ? `email:${email}` : `anon:${map.size}`);
+    if (!map.has(key)) {
+      map.set(key, item);
+      continue;
+    }
+
+    const existing = map.get(key);
+    const existingName = String(existing?.name || "").trim();
+    const nextName = String(item?.name || "").trim();
+    if (!existingName && nextName) {
+      map.set(key, item);
+    }
+  }
+  return [...map.values()];
+};
+
 const csvCell = (value) => {
   const text = String(value ?? "");
   return `"${text.replace(/"/g, '""')}"`;
@@ -460,7 +481,7 @@ export default function AdminDashboard() {
         page: usersPage,
         pageSize: usersPageSize,
       });
-      const nextUsers = (usersRes.items || []).map((item) => ({ ...item, role: "student" }));
+      const nextUsers = dedupeUsersForView((usersRes.items || []).map((item) => ({ ...item, role: "student" })));
       setUsers(nextUsers);
       setUsersTotal(usersRes.total || 0);
       setUsersHasMore(Boolean(usersRes.hasMore));
@@ -478,7 +499,7 @@ export default function AdminDashboard() {
       page: usersPage,
       pageSize: usersPageSize,
     });
-    const nextUsers = usersRes.items || [];
+    const nextUsers = dedupeUsersForView(usersRes.items || []);
     setUsers(nextUsers);
     setUsersTotal(usersRes.total || 0);
     setUsersHasMore(Boolean(usersRes.hasMore));
@@ -941,8 +962,8 @@ export default function AdminDashboard() {
 
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return users.filter((u) => {
-      const searchOk = !q || `${u.name || ""} ${u.email || ""}`.toLowerCase().includes(q);
+    return dedupeUsersForView(users).filter((u) => {
+      const searchOk = !q || `${u.id || ""} ${u.name || ""} ${u.email || ""}`.toLowerCase().includes(q);
       const statusOk =
         userStatusFilter === "all" ||
         (userStatusFilter === "enabled" && u.enabled !== false) ||

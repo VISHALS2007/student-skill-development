@@ -9,7 +9,9 @@ const configuredAdminBase = (() => {
   if (/\/api$/i.test(configuredApiBase)) return `${configuredApiBase}/admin`;
   return `${configuredApiBase}/api/admin`;
 })();
-const ADMIN_API_BASES = Array.from(new Set(["/api/admin", configuredAdminBase, "http://localhost:4000/api/admin", "http://localhost:5000/api/admin"].filter(Boolean)));
+const ADMIN_API_BASES = Array.from(
+  new Set([configuredAdminBase, "/api/admin", "http://localhost:4000/api/admin", "http://localhost:5000/api/admin"].filter(Boolean))
+);
 const DASHBOARD_CACHE_TTL_MS = 30000;
 const COURSES_CACHE_TTL_MS = 60000;
 const STUDENTS_CACHE_TTL_MS = 30000;
@@ -65,7 +67,7 @@ async function adminRequest(path, options = {}, requestConfig = {}) {
   const includeSessionHeader = requestConfig.includeSessionHeader !== false;
   const includeAuthHeader = requestConfig.includeAuthHeader !== false;
 
-  const shouldRetryHttpStatus = (status) => [404, 408, 429, 500, 502, 503, 504].includes(Number(status));
+  const shouldRetryHttpStatus = (status) => [404, 405, 408, 429, 500, 502, 503, 504].includes(Number(status));
 
   let lastError = null;
   for (const base of ADMIN_API_BASES) {

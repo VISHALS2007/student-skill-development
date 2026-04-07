@@ -9,8 +9,14 @@ const configuredAdminBase = (() => {
   if (/\/api$/i.test(configuredApiBase)) return `${configuredApiBase}/admin`;
   return `${configuredApiBase}/api/admin`;
 })();
+const isVercelHost = typeof window !== "undefined" && /\.vercel\.app$/i.test(String(window.location?.hostname || ""));
 const ADMIN_API_BASES = Array.from(
-  new Set([configuredAdminBase, "/api/admin", "http://localhost:4000/api/admin", "http://localhost:5000/api/admin"].filter(Boolean))
+  new Set(
+    (isVercelHost
+      ? ["/api/admin", configuredAdminBase, "http://localhost:4000/api/admin", "http://localhost:5000/api/admin"]
+      : [configuredAdminBase, "/api/admin", "http://localhost:4000/api/admin", "http://localhost:5000/api/admin"]
+    ).filter(Boolean)
+  )
 );
 const DASHBOARD_CACHE_TTL_MS = 30000;
 const COURSES_CACHE_TTL_MS = 60000;

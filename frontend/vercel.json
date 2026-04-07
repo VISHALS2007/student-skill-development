@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/(.*)",
+      "destination": "https://student-skill-development.onrender.com/api/$1"
+    },
+    {
       "source": "/((?!.*\\.).*)",
       "destination": "/index.html"
     }

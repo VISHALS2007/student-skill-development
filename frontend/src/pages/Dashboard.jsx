@@ -830,6 +830,7 @@ const Dashboard = () => {
     const isCommunication = skill.skillName?.toLowerCase().includes("communication");
     if (isCommunication) {
       const payload = createCommunicationPayload(skill);
+      if (url) openPracticeWindow(url);
       sessionStorage.removeItem(COMM_SESSION_STATE_KEY);
       sessionStorage.removeItem(COMM_SESSION_COMPLETED_KEY);
       sessionStorage.setItem("commSessionInfo", JSON.stringify(payload));

@@ -434,6 +434,7 @@ const Dashboard = () => {
         category: "Communication",
         autoStart: true,
       };
+      if (url) openPracticeWindow(url);
       sessionStorage.setItem("commSessionInfo", JSON.stringify(payload));
       navigate("/communication-session", { state: payload });
       return;

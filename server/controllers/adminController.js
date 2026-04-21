@@ -1,4 +1,4 @@
-import { firestore } from "../firebaseAdmin.js";
+import { firestore, isFirestoreConfigured } from "../firebaseAdmin.js";
 import jwt from "jsonwebtoken";
 import fs from "fs";
 import path from "path";
@@ -66,6 +66,7 @@ const cacheInvalidateByPrefix = (prefixes = []) => {
 
 const nowIso = () => new Date().toISOString();
 const normalizeEmail = (value = "") => String(value).trim().toLowerCase();
+const normalizeCourseTitleKey = (value = "") => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 const normalizeRole = (value = "") => {
   const role = String(value || "").trim().toLowerCase();
   if (role === "admin") return "main_admin";
@@ -86,6 +87,11 @@ const normalizePracticeType = (value = "") => {
   const key = String(value || "").trim().toLowerCase();
   if (["speaking", "listening", "writing"].includes(key)) return key;
   return "speaking";
+};
+const normalizeDurationMinutes = (value, fallback = 30) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(240, Math.max(1, Math.round(n)));
 };
 const toPercentage = (num = 0, den = 0) => {
   if (!den) return 0;
@@ -213,6 +219,17 @@ const dedupeUsersByEmail = (users = []) => {
   });
 
   return [...byId.values()];
+};
+
+const looksLikeFirebaseUid = (value = "") => /^[A-Za-z0-9]{20,40}$/.test(String(value || "").trim());
+
+const isValidRegisteredStudent = (user = {}) => {
+  const id = String(user?.id || "").trim();
+  const email = normalizeEmail(user?.email || "");
+  const role = normalizeRole(user?.role || "student");
+  if (role !== "student") return false;
+  if (!isInstitutionEmail(email)) return false;
+  return looksLikeFirebaseUid(id);
 };
 
 const courseDoc = (courseId) => firestore.collection(COURSES).doc(courseId);
@@ -706,7 +723,11 @@ const readLocalStudentProfiles = () => {
 export async function ensureDefaultAdminUser() {
   if (!DEFAULT_ADMIN_PASSWORD || !DEFAULT_SUB_ADMIN_PASSWORD) {
     console.warn("Skipping admin seed because ADMIN_PASSWORD/SUB_ADMIN_PASSWORD are not configured.");
-    return { seeded: false, skipped: true };
+    return { seeded: false, skipped: true, reason: "password-not-configured" };
+  }
+
+  if (!isFirestoreConfigured) {
+    return { seeded: false, skipped: true, reason: "firestore-not-configured" };
   }
 
   try {
@@ -749,8 +770,8 @@ export async function ensureDefaultAdminUser() {
 
     return { seeded };
   } catch (err) {
-    console.warn("Skipping admin seed because Firestore is not configured:", err?.message || err);
-    return { seeded: false, skipped: true };
+    console.warn("Skipping admin seed because Firestore is unavailable:", err?.message || err);
+    return { seeded: false, skipped: true, reason: "firestore-unavailable" };
   }
 }
 
@@ -1079,6 +1100,8 @@ export async function createCourse(req, res) {
       startDate,
       endDate,
       durationDays = 0,
+      defaultDuration = 30,
+      timeMinutes,
       difficulty = "Beginner",
       links = [],
       websiteRef = "",
@@ -1088,17 +1111,21 @@ export async function createCourse(req, res) {
 
     const courseTitle = (title || course_name || "").trim();
     if (!courseTitle) return res.status(400).json({ ok: false, error: "title is required" });
-    if (!description?.trim()) return res.status(400).json({ ok: false, error: "description is required" });
+    const courseTitleKey = normalizeCourseTitleKey(courseTitle);
+    const courseDescription = String(description || "").trim();
+    const nextDefaultDuration = normalizeDurationMinutes(defaultDuration ?? timeMinutes, 30);
 
     const payload = {
       title: courseTitle,
       course_name: courseTitle, // Keep for backward compatibility
       category,
       customCategory: category === "custom" ? customCategory.trim() : "",
-      description: description.trim(),
+      description: courseDescription || `Practice plan for ${courseTitle}`,
       startDate: startDate || "",
       endDate: endDate || "",
       durationDays: parseInt(durationDays) || 0,
+      defaultDuration: nextDefaultDuration,
+      timeMinutes: nextDefaultDuration,
       difficulty,
       links: Array.isArray(links) ? links : [],
       websiteRef: websiteRef?.trim() || "",
@@ -1113,12 +1140,29 @@ export async function createCourse(req, res) {
     };
 
     try {
+      const coursesSnap = await firestore.collection(COURSES).get();
+      const duplicate = coursesSnap.docs.some((docSnap) => {
+        const data = docSnap.data() || {};
+        const key = normalizeCourseTitleKey(data.title || data.course_name || "");
+        return key && key === courseTitleKey;
+      });
+      if (duplicate) {
+        return res.status(409).json({ ok: false, error: "Duplicate skill is not allowed" });
+      }
+
       const ref = await firestore.collection(COURSES).add(payload);
       cacheInvalidateByPrefix(["courses::", "dashboard::", "reports::"]);
       return res.status(201).json({ ok: true, id: ref.id });
     } catch (firestoreErr) {
       console.warn("createCourse firestore unavailable, using local fallback:", firestoreErr?.message || firestoreErr);
       const db = readLocalAdminDb();
+      const duplicateLocal = (db.courses || []).some((course) => {
+        const key = normalizeCourseTitleKey(course.title || course.course_name || "");
+        return key && key === courseTitleKey;
+      });
+      if (duplicateLocal) {
+        return res.status(409).json({ ok: false, error: "Duplicate skill is not allowed" });
+      }
       const id = randomUUID();
       db.courses.push({ id, ...payload });
       writeLocalAdminDb(db);
@@ -1142,6 +1186,8 @@ export async function updateCourse(req, res) {
       startDate,
       endDate,
       durationDays = 0,
+      defaultDuration,
+      timeMinutes,
       difficulty = "Beginner",
       links = [],
       websiteRef = "",
@@ -1165,6 +1211,11 @@ export async function updateCourse(req, res) {
     if (startDate !== undefined) updateData.startDate = startDate;
     if (endDate !== undefined) updateData.endDate = endDate;
     if (durationDays !== undefined) updateData.durationDays = parseInt(durationDays) || 0;
+    if (defaultDuration !== undefined || timeMinutes !== undefined) {
+      const nextDefaultDuration = normalizeDurationMinutes(defaultDuration ?? timeMinutes, 30);
+      updateData.defaultDuration = nextDefaultDuration;
+      updateData.timeMinutes = nextDefaultDuration;
+    }
     if (difficulty !== undefined) updateData.difficulty = difficulty;
     if (links !== undefined) updateData.links = Array.isArray(links) ? links : [];
     if (websiteRef !== undefined) updateData.websiteRef = websiteRef?.trim() || "";
@@ -1173,6 +1224,20 @@ export async function updateCourse(req, res) {
     updateData.updatedAt = nowIso();
 
     try {
+      if (updateData.title) {
+        const nextTitleKey = normalizeCourseTitleKey(updateData.title);
+        const coursesSnap = await firestore.collection(COURSES).get();
+        const duplicate = coursesSnap.docs.some((docSnap) => {
+          if (docSnap.id === courseId) return false;
+          const data = docSnap.data() || {};
+          const key = normalizeCourseTitleKey(data.title || data.course_name || "");
+          return key && key === nextTitleKey;
+        });
+        if (duplicate) {
+          return res.status(409).json({ ok: false, error: "Duplicate skill is not allowed" });
+        }
+      }
+
       await courseDoc(courseId).set(updateData, { merge: true });
       cacheInvalidateByPrefix(["courses::", "dashboard::", "reports::"]);
       return res.json({ ok: true });
@@ -1181,6 +1246,17 @@ export async function updateCourse(req, res) {
       const db = readLocalAdminDb();
       const idx = db.courses.findIndex((c) => c.id === courseId);
       if (idx === -1) return res.status(404).json({ ok: false, error: "Course not found" });
+      if (updateData.title) {
+        const nextTitleKey = normalizeCourseTitleKey(updateData.title);
+        const duplicateLocal = (db.courses || []).some((course, i) => {
+          if (i === idx) return false;
+          const key = normalizeCourseTitleKey(course.title || course.course_name || "");
+          return key && key === nextTitleKey;
+        });
+        if (duplicateLocal) {
+          return res.status(409).json({ ok: false, error: "Duplicate skill is not allowed" });
+        }
+      }
       db.courses[idx] = { ...db.courses[idx], ...updateData };
       writeLocalAdminDb(db);
       cacheInvalidateByPrefix(["courses::", "dashboard::", "reports::"]);
@@ -2363,14 +2439,15 @@ export async function listUsers(req, res) {
       .map((d) => enrichUserAcademicMeta({ id: d.id, ...d.data() }))
       .filter((u) => isInstitutionEmail(u.email || ""));
 
-    const localItems = readLocalStudentProfiles()
-      .map((u) => enrichUserAcademicMeta({ ...u, role: normalizeRole(u.role || "student") || "student" }))
-      .filter((u) => isInstitutionEmail(u.email || ""));
-
-    items = dedupeUsersByEmail([...items, ...localItems]);
+    // When Firestore is reachable, prefer canonical backend users only.
+    items = dedupeUsersByEmail(items).filter((u) => String(u.id || "").trim().length > 0);
 
     if (effectiveRole !== "all") {
       items = items.filter((u) => normalizeRole(u.role || "student") === effectiveRole);
+    }
+
+    if (effectiveRole === "student") {
+      items = items.filter(isValidRegisteredStudent);
     }
 
     if (status === "active" || status === "enabled") {
@@ -2413,7 +2490,7 @@ export async function listUsers(req, res) {
     const paginatedItems = projectedItems.slice(start, start + pageSize);
     return res.json({ ok: true, items: paginatedItems, page, pageSize, total, hasMore: start + pageSize < total });
   } catch (err) {
-    console.warn("listUsers firestore unavailable, using local fallback:", err?.message || err);
+    console.error("listUsers backend user registry unavailable", err?.message || err);
     const search = normalizeEmail(req.query.search || "");
     const requestedRole = normalizeRole(req.query.role || "student");
     const actorRole = normalizeRole(req.admin?.role || req.user?.role || "");
@@ -2427,52 +2504,71 @@ export async function listUsers(req, res) {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
     const pageSize = Math.min(Math.max(parseInt(req.query.pageSize, 10) || 10, 1), 200);
 
-    let items = readLocalStudentProfiles().map((u) => enrichUserAcademicMeta({ ...u, role: normalizeRole(u.role || "student") || "student" }));
+    let items = dedupeUsersByEmail(
+      readLocalStudentProfiles()
+        .map((student) => enrichUserAcademicMeta(student))
+        .filter((student) => isInstitutionEmail(student.email || ""))
+    );
+
     if (effectiveRole !== "all") {
-      items = items.filter((u) => normalizeRole(u.role || "student") === effectiveRole);
+      items = items.filter((student) => normalizeRole(student.role || "student") === effectiveRole);
     }
-    items = items.filter((u) => isInstitutionEmail(u.email || ""));
+
+    if (effectiveRole === "student") {
+      items = items.filter(isValidRegisteredStudent);
+    }
 
     if (status === "active" || status === "enabled") {
-      items = items.filter((u) => u.enabled !== false);
+      items = items.filter((student) => student.enabled !== false);
     } else if (status === "inactive" || status === "disabled") {
-      items = items.filter((u) => u.enabled === false);
+      items = items.filter((student) => student.enabled === false);
     }
 
     if (department) {
-      items = items.filter((u) => {
-        const fullDept = String(u.department || u.course || "").toLowerCase();
-        const code = String(u.departmentCode || "").toLowerCase();
+      items = items.filter((student) => {
+        const fullDept = String(student.department || student.course || "").toLowerCase();
+        const code = String(student.departmentCode || "").toLowerCase();
         return fullDept === department || code === department;
       });
     }
+
     if (batch) {
-      items = items.filter((u) => String(u.batch || "") === batch);
+      items = items.filter((student) => String(student.batch || "") === batch);
     }
+
     if (year) {
-      items = items.filter((u) => String(u.year || "") === year);
+      items = items.filter((student) => String(student.year || "") === year);
     }
 
     if (search) {
-      items = items.filter((u) => `${u.id || ""} ${u.name || ""} ${u.email || ""}`.toLowerCase().includes(search));
+      items = items.filter((student) => `${student.id || ""} ${student.name || ""} ${student.email || ""}`.toLowerCase().includes(search));
     }
-    items = dedupeUsersByEmail(items);
 
+    items = dedupeUsersByEmail(items);
+    const safeItems = items.map(({ password, ...safe }) => safe);
     const projectedItems = fields.length
-      ? items.map((item) => {
+      ? safeItems.map((item) => {
           const projected = { id: item.id };
           fields.forEach((field) => {
             if (field in item) projected[field] = item[field];
           });
           return projected;
         })
-      : items;
+      : safeItems;
 
     const total = projectedItems.length;
     const start = (page - 1) * pageSize;
     const paginatedItems = projectedItems.slice(start, start + pageSize);
-
-    return res.json({ ok: true, items: paginatedItems, page, pageSize, total, hasMore: start + pageSize < total, source: "local-fallback" });
+    return res.json({
+      ok: true,
+      items: paginatedItems,
+      page,
+      pageSize,
+      total,
+      hasMore: start + pageSize < total,
+      source: "local-fallback",
+      warning: "User registry unavailable. Showing local student profiles instead.",
+    });
   }
 }
 

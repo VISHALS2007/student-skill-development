@@ -12,17 +12,17 @@ export default function DashboardCard({ children, icon: Icon, title, subtitle, a
   const accentClass = accentMap[accent] || accentMap.indigo;
 
   return (
-    <div className="ui-card relative overflow-hidden transition-all duration-200 hover:shadow-md">
+    <div className="ui-card ui-dash-card relative overflow-hidden transition-all duration-200 hover:shadow-md">
       <div className={`absolute inset-0 bg-gradient-to-br ${accentClass} opacity-30 pointer-events-none`} />
       <div className="relative">
-        <div className="flex items-center gap-3 mb-3">
+        <div className="ui-dash-card-head flex items-center gap-3 mb-3">
           {Icon && (
-            <div className="w-10 h-10 rounded-lg bg-white grid place-items-center text-slate-700 shadow-sm border border-slate-200">
+            <div className="ui-dash-card-icon w-10 h-10 rounded-lg bg-white grid place-items-center text-slate-700 shadow-sm border border-slate-200">
               <Icon className="text-[18px]" />
             </div>
           )}
-          <div>
-            <p className="text-[13px] text-slate-500 font-medium">{subtitle}</p>
+          <div className="min-w-0">
+            {subtitle ? <p className="ui-dash-subtitle text-[13px] text-slate-500 font-medium">{subtitle}</p> : null}
             <h3 className="ui-card-title">{title}</h3>
           </div>
         </div>

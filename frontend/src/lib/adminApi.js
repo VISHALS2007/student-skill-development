@@ -21,9 +21,47 @@ const ADMIN_API_BASES = Array.from(
 const DASHBOARD_CACHE_TTL_MS = 30000;
 const COURSES_CACHE_TTL_MS = 60000;
 const STUDENTS_CACHE_TTL_MS = 30000;
+const IS_LOCAL_HOST = typeof window !== "undefined" && /^(localhost|127\.0\.0\.1)$/i.test(String(window.location?.hostname || ""));
+const DEFAULT_TIMEOUT_MS = IS_LOCAL_HOST ? 3000 : 7000;
+const BASE_FAILURE_COOLDOWN_MS = 15000;
+const AUTH_HEADER_TTL_MS = 55000;
 const dashboardCache = new Map();
 const coursesCache = new Map();
 const studentsCache = new Map();
+const adminBaseFailureUntil = new Map();
+
+let preferredAdminBase = "";
+let cachedAuthHeader = {};
+let cachedAuthUid = "";
+let cachedAuthAt = 0;
+
+const rankAdminBases = (bases = []) => {
+  const now = Date.now();
+  const available = [];
+  const coolingDown = [];
+
+  bases.forEach((base) => {
+    const blockedUntil = Number(adminBaseFailureUntil.get(base) || 0);
+    if (blockedUntil > now) {
+      coolingDown.push(base);
+    } else {
+      available.push(base);
+    }
+  });
+
+  return available.length ? [...available, ...coolingDown] : bases;
+};
+
+const markAdminBaseFailed = (base) => {
+  if (!base) return;
+  adminBaseFailureUntil.set(base, Date.now() + BASE_FAILURE_COOLDOWN_MS);
+};
+
+const markAdminBaseHealthy = (base) => {
+  if (!base) return;
+  preferredAdminBase = base;
+  adminBaseFailureUntil.delete(base);
+};
 
 const getAdminSessionHeader = () => {
   try {
@@ -47,15 +85,22 @@ const getAdminTokenHeader = () => {
 async function getAuthHeader() {
   try {
     if (!auth.currentUser) return {};
+    const uid = String(auth.currentUser.uid || "");
+    if (uid && uid === cachedAuthUid && Date.now() - cachedAuthAt < AUTH_HEADER_TTL_MS) {
+      return cachedAuthHeader;
+    }
     const token = await auth.currentUser.getIdToken();
     if (!token) return {};
-    return { Authorization: `Bearer ${token}` };
+    cachedAuthHeader = { Authorization: `Bearer ${token}` };
+    cachedAuthUid = uid;
+    cachedAuthAt = Date.now();
+    return cachedAuthHeader;
   } catch {
     return {};
   }
 }
 
-const withTimeout = async (promise, timeoutMs = 6000) => {
+const withTimeout = async (promise, timeoutMs = DEFAULT_TIMEOUT_MS) => {
   let timer;
   const timeoutPromise = new Promise((_, reject) => {
     timer = setTimeout(() => reject(new Error("Request timeout")), timeoutMs);
@@ -72,11 +117,14 @@ async function adminRequest(path, options = {}, requestConfig = {}) {
   const adminTokenHeader = getAdminTokenHeader();
   const includeSessionHeader = requestConfig.includeSessionHeader !== false;
   const includeAuthHeader = requestConfig.includeAuthHeader !== false;
+  const timeoutMs = Number(requestConfig.timeoutMs || DEFAULT_TIMEOUT_MS);
 
   const shouldRetryHttpStatus = (status) => [404, 405, 408, 429, 500, 502, 503, 504].includes(Number(status));
+  const dedupedBases = Array.from(new Set([preferredAdminBase, ...ADMIN_API_BASES].filter(Boolean)));
+  const rankedBases = rankAdminBases(dedupedBases);
 
   let lastError = null;
-  for (const base of ADMIN_API_BASES) {
+  for (const base of rankedBases) {
     try {
       const response = await withTimeout(
         fetch(`${base}${path}`, {
@@ -87,7 +135,8 @@ async function adminRequest(path, options = {}, requestConfig = {}) {
             ...(includeAuthHeader ? (Object.keys(authHeader).length ? authHeader : adminTokenHeader) : {}),
             ...(options.headers || {}),
           },
-        })
+        }),
+        timeoutMs
       );
 
       const text = await response.text();
@@ -108,6 +157,7 @@ async function adminRequest(path, options = {}, requestConfig = {}) {
 
         // Retry on likely endpoint/base/server issues before failing hard.
         if (shouldRetryHttpStatus(response.status)) {
+          markAdminBaseFailed(base);
           lastError = httpError;
           continue;
         }
@@ -115,16 +165,19 @@ async function adminRequest(path, options = {}, requestConfig = {}) {
         throw httpError;
       }
 
+      markAdminBaseHealthy(base);
       return data;
     } catch (err) {
       // If the server responded with an HTTP error, surface it immediately.
       if (err?.isHttpError) {
         if (shouldRetryHttpStatus(err.status)) {
+          markAdminBaseFailed(base);
           lastError = err;
           continue;
         }
         throw err;
       }
+      markAdminBaseFailed(base);
       lastError = err;
     }
   }
@@ -136,14 +189,14 @@ async function adminRequest(path, options = {}, requestConfig = {}) {
     lastMessage.toLowerCase().includes("timeout");
 
   if (isNetworkIssue) {
-    throw new Error("Cannot connect to admin server. Start backend: cd server ; npm run dev");
+    throw new Error("Cannot connect to admin server. Start dev servers with: npm run dev");
   }
 
   if (lastError?.isHttpError && shouldRetryHttpStatus(lastError.status)) {
-    throw new Error("Cannot connect to admin server. Start backend: cd server ; npm run dev");
+    throw new Error("Cannot connect to admin server. Start dev servers with: npm run dev");
   }
 
-  throw new Error(lastMessage || "Cannot reach admin API. Start backend: cd server ; npm run dev");
+  throw new Error(lastMessage || "Cannot reach admin API. Start dev servers with: npm run dev");
 }
 
 export const adminApi = {

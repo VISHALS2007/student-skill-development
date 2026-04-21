@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { addDoc, collection, getDocs, query, serverTimestamp, where } from "firebase/firestore";
 import GlobalLayout from "../components/GlobalLayout";
 import DashboardCard from "../components/DashboardCard";
@@ -64,7 +64,7 @@ const FocusCommunication = () => {
     setTopic(topics[idx]);
   };
 
-  const stopCamera = () => {
+  const stopCamera = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
@@ -72,9 +72,9 @@ const FocusCommunication = () => {
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-  };
+  }, []);
 
-  const markCompletion = async () => {
+  const markCompletion = useCallback(async () => {
     if (!user?.uid) return;
     const today = new Date().toISOString().split("T")[0];
     try {
@@ -101,7 +101,7 @@ const FocusCommunication = () => {
     } catch (err) {
       console.error("Failed to log communication completion", err);
     }
-  };
+  }, [durationMinutes, sessionStart, user?.uid]);
 
   useEffect(() => {
     const loadCompletion = async () => {
@@ -124,7 +124,7 @@ const FocusCommunication = () => {
     loadCompletion();
   }, [user]);
 
-  const exitFullscreen = async () => {
+  const exitFullscreen = useCallback(async () => {
     if (document.fullscreenElement) {
       try {
         await document.exitFullscreen();
@@ -132,9 +132,9 @@ const FocusCommunication = () => {
         console.error("Exit fullscreen failed", err);
       }
     }
-  };
+  }, []);
 
-  const stopTimer = (completed = false) => {
+  const stopTimer = useCallback((completed = false) => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
@@ -145,7 +145,7 @@ const FocusCommunication = () => {
     if (completed) {
       markCompletion();
     }
-  };
+  }, [exitFullscreen, markCompletion, stopCamera]);
 
   const startTimer = async () => {
     if (completedToday || loading) return;
@@ -216,7 +216,7 @@ const FocusCommunication = () => {
 
   useEffect(() => () => {
     stopTimer(false);
-  }, []);
+  }, [stopTimer]);
 
   return (
     <GlobalLayout>

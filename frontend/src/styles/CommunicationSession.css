@@ -28,6 +28,34 @@
   text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
 }
 
+.comm-top-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(68vw, 920px);
+}
+
+.comm-headline {
+  margin: 0;
+  font-size: clamp(20px, 3vw, 38px);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+}
+
+.comm-note {
+  margin: 0;
+  opacity: 0.9;
+  font-size: 12px;
+}
+
+.comm-top-right {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
 .comm-overlay-top {
   top: 0;
   background: linear-gradient(180deg, rgba(0, 0, 0, 0.55), transparent);
@@ -38,6 +66,7 @@
   bottom: 0;
   background: linear-gradient(0deg, rgba(0, 0, 0, 0.6), transparent);
   justify-content: space-between;
+  align-items: flex-end;
 }
 
 .comm-pill {
@@ -48,6 +77,23 @@
   font-size: 12px;
   letter-spacing: 0.05em;
   text-transform: uppercase;
+}
+
+.comm-pill.is-running {
+  background: rgba(16, 185, 129, 0.2);
+  border: 1px solid rgba(16, 185, 129, 0.55);
+}
+
+.comm-pill.is-paused {
+  background: rgba(245, 158, 11, 0.18);
+  border: 1px solid rgba(245, 158, 11, 0.5);
+}
+
+.comm-topic-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(58vw, 850px);
 }
 
 .comm-topic-text {
@@ -93,6 +139,9 @@
 .comm-actions-inline {
   display: flex;
   gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .comm-btn {
@@ -130,4 +179,44 @@
   padding: 12px 16px;
   border-radius: 12px;
   font-weight: 700;
+}
+
+.comm-pin-warning {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(251, 146, 60, 0.9);
+  color: #111827;
+  padding: 10px 14px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+@media (max-width: 920px) {
+  .comm-overlay-top,
+  .comm-overlay-bottom {
+    padding: 12px 14px;
+  }
+
+  .comm-overlay-top,
+  .comm-overlay-bottom,
+  .comm-topic-row {
+    flex-direction: column;
+    align-items: flex-start;
+    max-width: 100%;
+  }
+
+  .comm-top-right {
+    align-items: flex-start;
+  }
+
+  .comm-actions-inline {
+    justify-content: flex-start;
+  }
+
+  .comm-timer-large {
+    font-size: 34px;
+  }
 }

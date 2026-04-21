@@ -88,6 +88,9 @@ const normalizeTopPanelStatus = (value = "") => {
   return message;
 };
 
+const isOfflineStatusMessage = (value = "") => /backend server is offline/i.test(String(value || ""));
+const OFFLINE_RETRY_INTERVAL_MS = 5000;
+
 const dedupeUsersForView = (items = []) => {
   const map = new Map();
   for (const item of items || []) {
@@ -107,6 +110,22 @@ const dedupeUsersForView = (items = []) => {
     }
   }
   return [...map.values()];
+};
+
+const resolveCourseDisplayTitle = (item = {}, courseById = new Map()) => {
+  const courseDoc = courseById.get(item.course_id) || {};
+  const candidates = [
+    item.courseTitle,
+    item.title,
+    item.course_name,
+    courseDoc.title,
+    courseDoc.course_name,
+    courseDoc.courseTitle,
+    item.name,
+  ]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return candidates[0] || String(item.course_id || "Allocated Course");
 };
 
 const csvCell = (value) => {
@@ -230,6 +249,7 @@ export default function AdminDashboard() {
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const loadedSectionsRef = useRef(new Set());
   const topPanelStatus = useMemo(() => normalizeTopPanelStatus(status), [status]);
+  const isOfflineStatus = useMemo(() => isOfflineStatusMessage(topPanelStatus), [topPanelStatus]);
 
   useEffect(() => {
     let active = true;
@@ -323,6 +343,13 @@ export default function AdminDashboard() {
       // ignore cache delete errors
     }
   }, []);
+
+  const clearAdminCaches = useCallback(() => {
+    invalidateDashboardCache();
+    adminApi.clearDashboardCache();
+    adminApi.clearCoursesCache();
+    adminApi.clearStudentsCache();
+  }, [invalidateDashboardCache]);
 
   const analytics = useMemo(() => {
     const todayKey = new Date().toISOString().slice(0, 10);
@@ -469,19 +496,43 @@ export default function AdminDashboard() {
 
     if (firstError?.status === "rejected") {
       setStatus(firstError.reason?.message || "Some admin data could not be loaded");
+    } else {
+      setStatus("");
     }
   }, [adminRole, attendanceCourseId, attendanceDate, readDashboardCache, writeDashboardCache, courses, assignments, reports, attendance, leaderboard, assessmentResults, recentAssessmentResults]);
 
-  const loadUsersOnly = useCallback(async () => {
-    if (isSubAdminRole(adminRole)) {
-      const usersRes = await adminApi.getStudents({
-        search: debouncedSearch,
+  const loadUsersOnly = useCallback(async ({ force = false } = {}) => {
+    try {
+      if (isSubAdminRole(adminRole)) {
+        const usersRes = await adminApi.getStudents({
+          search: debouncedSearch,
+          fields: "name,email,enabled,role,department,departmentCode,batch,course,year",
+          status: userStatusFilter,
+          page: usersPage,
+          pageSize: usersPageSize,
+          force,
+        });
+        const nextUsers = dedupeUsersForView((usersRes.items || []).map((item) => ({ ...item, role: "student" })));
+        setUsers(nextUsers);
+        setUsersTotal(usersRes.total || 0);
+        setUsersHasMore(Boolean(usersRes.hasMore));
+        if (selectedUserId) {
+          const existing = nextUsers.find((u) => u.id === selectedUserId) || null;
+          if (existing) setSelectedUser(existing);
+        }
+        setStatus("");
+        return;
+      }
+
+      const usersRes = await adminApi.getUsers(debouncedSearch, {
+        role: userRoleFilter,
         fields: "name,email,enabled,role,department,departmentCode,batch,course,year",
         status: userStatusFilter,
         page: usersPage,
         pageSize: usersPageSize,
+        force,
       });
-      const nextUsers = dedupeUsersForView((usersRes.items || []).map((item) => ({ ...item, role: "student" })));
+      const nextUsers = dedupeUsersForView(usersRes.items || []);
       setUsers(nextUsers);
       setUsersTotal(usersRes.total || 0);
       setUsersHasMore(Boolean(usersRes.hasMore));
@@ -489,23 +540,13 @@ export default function AdminDashboard() {
         const existing = nextUsers.find((u) => u.id === selectedUserId) || null;
         if (existing) setSelectedUser(existing);
       }
-      return;
-    }
-
-    const usersRes = await adminApi.getUsers(debouncedSearch, {
-      role: userRoleFilter,
-      fields: "name,email,enabled,role,department,departmentCode,batch,course,year",
-      status: userStatusFilter,
-      page: usersPage,
-      pageSize: usersPageSize,
-    });
-    const nextUsers = dedupeUsersForView(usersRes.items || []);
-    setUsers(nextUsers);
-    setUsersTotal(usersRes.total || 0);
-    setUsersHasMore(Boolean(usersRes.hasMore));
-    if (selectedUserId) {
-      const existing = nextUsers.find((u) => u.id === selectedUserId) || null;
-      if (existing) setSelectedUser(existing);
+      setStatus("");
+    } catch (err) {
+      setUsers([]);
+      setUsersTotal(0);
+      setUsersHasMore(false);
+      setSelectedUser(null);
+      throw err;
     }
   }, [adminRole, debouncedSearch, userRoleFilter, userStatusFilter, usersPage, usersPageSize, selectedUserId]);
 
@@ -518,7 +559,7 @@ export default function AdminDashboard() {
         category: courseCategoryFilter,
         status: courseStatusFilter,
         date: courseDateFilter,
-        fields: "title,course_name,category,customCategory,description,startDate,endDate,durationDays,difficulty,status,links,websiteRef",
+        fields: "title,course_name,category,customCategory,description,startDate,endDate,durationDays,defaultDuration,difficulty,status,links,websiteRef",
         page: targetPage,
         pageSize: 10,
         force,
@@ -529,6 +570,7 @@ export default function AdminDashboard() {
       setCoursesPage(targetPage);
       setCoursesTotal(result.total || 0);
       setCoursesHasMore(Boolean(result.hasMore));
+      setStatus("");
     } catch (err) {
       setStatus(err.message || "Failed to load courses");
     } finally {
@@ -537,13 +579,6 @@ export default function AdminDashboard() {
   }, [debouncedCourseSearch, courseCategoryFilter, courseStatusFilter, courseDateFilter, coursesPage]);
 
   const loadAllocationStudents = useCallback(async ({ append = false, force = false, pageOverride = null } = {}) => {
-    if (!assignCourseId) {
-      setAllocationStudents([]);
-      setAllocationStudentsTotal(0);
-      setAllocationStudentsHasMore(false);
-      return;
-    }
-
     const targetPage = pageOverride ?? (append ? allocationStudentsPage + 1 : 1);
     setAllocationStudentsLoading(true);
     try {
@@ -562,6 +597,7 @@ export default function AdminDashboard() {
       setAllocationStudentsPage(targetPage);
       setAllocationStudentsTotal(res.total || 0);
       setAllocationStudentsHasMore(Boolean(res.hasMore));
+      setStatus("");
     } catch (err) {
       setStatus(err.message || "Failed to load students for allocation");
     } finally {
@@ -580,13 +616,14 @@ export default function AdminDashboard() {
       setAllottedSkillsPage(targetPage);
       setAllottedSkillsTotal(res.total || 0);
       setAllottedSkillsHasMore(Boolean(res.hasMore));
+      setStatus("");
 
       if (!selectedCommunicationSkillId) {
         const firstCommunication = nextItems.find((item) => item.category === "communication");
         if (firstCommunication?.id) setSelectedCommunicationSkillId(firstCommunication.id);
       }
     } catch (err) {
-      setStatus(err.message || "Failed to load allotted skills");
+      setStatus(err.message || "Failed to load allocated courses");
     } finally {
       setAllottedSkillsLoading(false);
     }
@@ -610,6 +647,7 @@ export default function AdminDashboard() {
     setCommunicationSubmissionsTotal(res.total || 0);
     setCommunicationSubmissionsHasMore(Boolean(res.hasMore));
     setCommunicationSubmissionsPage(pageOverride);
+    setStatus("");
     setCommunicationReviewDrafts(
       Object.fromEntries(
         (res.items || []).map((item) => [item.id, { status: item.status || "submitted", marks: Number(item.marks || 0), feedback: item.feedback || "" }])
@@ -657,11 +695,20 @@ export default function AdminDashboard() {
     setLoadingSection(true);
     try {
       if (section === "users") {
-        await loadUsersOnly();
+        await loadUsersOnly({ force });
       } else if (section === "courses") {
         await loadCoursesFeed({ append: false, force, pageOverride: 1 });
+      } else if (section === "allocation") {
+        await Promise.all([
+          loadDashboardData(false),
+          loadAllocationStudents({ append: false, force, pageOverride: 1 }),
+          loadAllottedSkills({ append: false, pageOverride: 1 }),
+        ]);
+        if (selectedCommunicationSkillId) {
+          await loadCommunicationTasksAndSubmissions();
+        }
       } else {
-        await loadDashboardData(section === "allocation" ? false : !force);
+        await loadDashboardData(!force);
       }
       loadedSectionsRef.current.add(section);
     } catch (err) {
@@ -669,18 +716,19 @@ export default function AdminDashboard() {
     } finally {
       setLoadingSection(false);
     }
-  }, [canAccessSection, loadDashboardData, loadUsersOnly, loadCoursesFeed]);
+  }, [canAccessSection, loadDashboardData, loadUsersOnly, loadCoursesFeed, loadAllocationStudents, loadAllottedSkills, selectedCommunicationSkillId, loadCommunicationTasksAndSubmissions]);
 
   const loadAll = useCallback(async () => {
     setLoadingSection(true);
     try {
-      await Promise.all([loadDashboardData(false), loadUsersOnly()]);
+      clearAdminCaches();
+      await Promise.all([loadDashboardData(false), loadUsersOnly({ force: true })]);
     } catch (err) {
       setStatus(err.message || "Failed to refresh dashboard");
     } finally {
       setLoadingSection(false);
     }
-  }, [loadDashboardData, loadUsersOnly]);
+  }, [clearAdminCaches, loadDashboardData, loadUsersOnly]);
 
   useEffect(() => {
     if (!roleResolved) return;
@@ -697,8 +745,16 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (!roleResolved) return;
     if (activeSection === "users") {
-      loadUsersOnly().catch((err) => setStatus(err.message || "Failed to load users"));
+      loadUsersOnly({ force: true }).catch((err) => setStatus(err.message || "Failed to load users"));
     }
+  }, [roleResolved, activeSection, loadUsersOnly]);
+
+  useEffect(() => {
+    if (!roleResolved || activeSection !== "users") return;
+    const interval = setInterval(() => {
+      loadUsersOnly({ force: true }).catch((err) => setStatus(err.message || "Failed to refresh users"));
+    }, 12000);
+    return () => clearInterval(interval);
   }, [roleResolved, activeSection, loadUsersOnly]);
 
   useEffect(() => {
@@ -712,7 +768,7 @@ export default function AdminDashboard() {
     if (!roleResolved) return;
     if (activeSection === "allocation") {
       loadAllocationStudents({ append: false, pageOverride: 1 }).catch((err) => setStatus(err.message || "Failed to load students"));
-      loadAllottedSkills({ append: false, pageOverride: 1 }).catch((err) => setStatus(err.message || "Failed to load allotted skills"));
+      loadAllottedSkills({ append: false, pageOverride: 1 }).catch((err) => setStatus(err.message || "Failed to load allocated courses"));
     }
   }, [roleResolved, activeSection, loadAllocationStudents, loadAllottedSkills]);
 
@@ -729,6 +785,14 @@ export default function AdminDashboard() {
     }, 30000);
     return () => clearInterval(timer);
   }, [activeSection, loadSectionData]);
+
+  useEffect(() => {
+    if (!isOfflineStatus || loadingSection) return;
+    const timer = setInterval(() => {
+      loadSectionData(activeSection || "dashboard", true).catch(() => {});
+    }, OFFLINE_RETRY_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [activeSection, isOfflineStatus, loadSectionData, loadingSection]);
 
   useEffect(() => {
     if (!selectedAssignment) {
@@ -767,7 +831,7 @@ export default function AdminDashboard() {
       }
       setCourseForm(emptyCourse);
       setEditingCourseId("");
-      invalidateDashboardCache();
+      clearAdminCaches();
       await loadSectionData("courses", true);
     } catch (err) {
       const message = err.message || "Failed to save course";
@@ -805,7 +869,7 @@ export default function AdminDashboard() {
       }
       setAssignmentForm(emptyAssignment);
       setEditingAssignmentId("");
-      invalidateDashboardCache();
+      clearAdminCaches();
       await loadSectionData("assignments", true);
     } catch (err) {
       const message = err.message || "Failed to save assessment";
@@ -830,7 +894,8 @@ export default function AdminDashboard() {
       const message = user.enabled === false ? "User enabled" : "User disabled";
       setStatus(message);
       toast.success(message, { containerId: "global-toasts" });
-      await loadUsersOnly();
+      clearAdminCaches();
+      await Promise.all([loadUsersOnly({ force: true }), loadDashboardData(false)]);
     } catch (err) {
       const message = err.message || "Failed to update user status";
       setStatus(message);
@@ -857,7 +922,8 @@ export default function AdminDashboard() {
       const message = `Role updated to ${nextRole}`;
       setStatus(message);
       toast.success(message, { containerId: "global-toasts" });
-      await loadUsersOnly();
+      clearAdminCaches();
+      await Promise.all([loadUsersOnly({ force: true }), loadDashboardData(false)]);
     } catch (err) {
       const message = err.message || "Failed to update user role";
       setStatus(message);
@@ -879,7 +945,8 @@ export default function AdminDashboard() {
       await adminApi.deleteUser(userId);
       setStatus("User deleted");
       toast.success("User deleted", { containerId: "global-toasts" });
-      await loadUsersOnly();
+      clearAdminCaches();
+      await Promise.all([loadUsersOnly({ force: true }), loadDashboardData(false)]);
     } catch (err) {
       const message = err.message || "Failed to delete user";
       setStatus(message);
@@ -894,7 +961,7 @@ export default function AdminDashboard() {
     try {
       await adminApi.deleteCourse(courseId);
       setStatus("Course deleted");
-      invalidateDashboardCache();
+      clearAdminCaches();
       await loadSectionData("courses", true);
     } catch (err) {
       setStatus(err.message || "Failed to delete course");
@@ -912,7 +979,7 @@ export default function AdminDashboard() {
       setStatus("Assessment deleted");
       toast.success("Assessment deleted", { containerId: "global-toasts" });
       if (selectedAssignment === assignmentId) setSelectedAssignment("");
-      invalidateDashboardCache();
+      clearAdminCaches();
       await loadSectionData("assignments", true);
     } catch (err) {
       const message = err.message || "Failed to delete assessment";
@@ -1155,7 +1222,7 @@ export default function AdminDashboard() {
       setAssignStartDate("");
       setAssignEndDate("");
       await loadAllocationStudents({ append: false, force: true, pageOverride: 1 });
-      invalidateDashboardCache();
+      clearAdminCaches();
       await loadSectionData("allocation", true);
     } catch (err) {
       setStatus(err.message || "Failed to assign course");
@@ -1178,6 +1245,7 @@ export default function AdminDashboard() {
       toast.success("Allocation removed", { containerId: "global-toasts" });
       setSelectedUserIds((prev) => prev.filter((id) => id !== userId));
       adminApi.clearStudentsCache();
+      clearAdminCaches();
       await loadAllocationStudents({ append: false, force: true, pageOverride: 1 });
     } catch (err) {
       setStatus(err.message || "Failed to remove student from course");
@@ -1205,6 +1273,7 @@ export default function AdminDashboard() {
       });
       toast.success("Task created", { containerId: "global-toasts" });
       setCommunicationTaskForm(emptyCommunicationTask);
+      clearAdminCaches();
       await loadCommunicationTasksAndSubmissions();
       await loadAllottedSkills({ append: false, pageOverride: 1 });
     } catch (err) {
@@ -1228,6 +1297,7 @@ export default function AdminDashboard() {
     try {
       await adminApi.updateCommunicationTask(taskId, draft);
       toast.success("Task updated", { containerId: "global-toasts" });
+      clearAdminCaches();
       await loadCommunicationTasksAndSubmissions();
     } catch (err) {
       const message = err.message || "Failed to update task";
@@ -1249,6 +1319,7 @@ export default function AdminDashboard() {
         feedback: String(draft.feedback || "").trim(),
       });
       toast.success("Submission reviewed", { containerId: "global-toasts" });
+      clearAdminCaches();
       await loadCommunicationSubmissions({ pageOverride: communicationSubmissionsPage });
       await loadAllottedSkills({ append: false, pageOverride: 1 });
     } catch (err) {
@@ -1273,7 +1344,7 @@ export default function AdminDashboard() {
       await adminApi.markBulkAttendance({ course_id: attendanceCourseId, date: attendanceDate, entries });
       setStatus("Attendance saved");
       toast.success("Attendance saved", { containerId: "global-toasts" });
-      invalidateDashboardCache();
+      clearAdminCaches();
       await loadSectionData("attendance", true);
     } catch (err) {
       const message = err.message || "Failed to save attendance";
@@ -1390,8 +1461,8 @@ export default function AdminDashboard() {
                     <Icon className="text-[20px]" />
                   </span>
                   <div className="dashboard-metric-text">
-                    <div className="text-xs uppercase tracking-wide text-slate-500 font-semibold">{item.label}</div>
-                    <div className="text-3xl font-bold text-slate-900">
+                    <div className="dashboard-metric-label">{item.label}</div>
+                    <div className="dashboard-metric-value">
                       <CountUpValue value={item.value} suffix={item.suffix || ""} />
                     </div>
                   </div>
@@ -1404,10 +1475,10 @@ export default function AdminDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <DashboardCard title="Workflow" subtitle="Overview" icon={FiRefreshCw} accent="indigo">
             <div className="space-y-3 text-sm text-slate-700">
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">Single login</div>
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">Users and attendance</div>
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">Courses and allocation</div>
-              <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">Assessments and reports</div>
+              <div className="dashboard-workflow-step">Single login</div>
+              <div className="dashboard-workflow-step">Users and attendance</div>
+              <div className="dashboard-workflow-step">Courses and allocation</div>
+              <div className="dashboard-workflow-step">Assessments and reports</div>
             </div>
           </DashboardCard>
           <DashboardCard title="Quick Actions" subtitle="Actions" icon={FiUpload} accent="purple">
@@ -1421,7 +1492,7 @@ export default function AdminDashboard() {
                 ["Performance", "progress"],
                 ["Reports", "reports"],
               ].filter(([, section]) => canAccessSection(section)).map(([label, section]) => (
-                <button key={section} className="rounded-xl border border-slate-100 bg-white p-3 text-sm font-semibold text-slate-800" onClick={() => setActiveSection(section)}>
+                <button key={section} className="dashboard-quick-action" onClick={() => setActiveSection(section)}>
                   {label}
                 </button>
               ))}
@@ -1451,47 +1522,52 @@ export default function AdminDashboard() {
               <option value="enabled">Enabled</option>
               <option value="disabled">Disabled</option>
             </select>
-            <button className="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-60" onClick={() => loadUsersOnly()} disabled={loadingSection}>
+            <button className="px-4 py-2 rounded-xl bg-slate-900 text-white text-sm font-semibold disabled:opacity-60" onClick={() => loadUsersOnly({ force: true })} disabled={loadingSection}>
               {loadingSection ? "Loading..." : "Load"}
             </button>
           </div>
           <div className="space-y-2 max-h-[560px] overflow-auto pr-1">
-            {filteredUsers.map((user) => (
-              <div key={user.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-semibold text-slate-900">{user.name || user.email}</p>
-                  <p className="text-xs text-slate-500">{user.email}</p>
-                  <p className="text-xs text-slate-500">User ID: {user.id}</p>
-                  <p className="text-xs text-slate-500 uppercase">Role: {normalizeAdminRole(user.role || "student")}</p>
+            {filteredUsers.map((user) => {
+              const emailText = String(user.email || "").trim();
+              const nameText = String(user.name || "").trim();
+              const showName = Boolean(nameText) && nameText.toLowerCase() !== emailText.toLowerCase();
+              return (
+                <div key={user.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-slate-900">{showName ? nameText : emailText}</p>
+                    {showName ? <p className="text-xs text-slate-500">{emailText}</p> : null}
+                    <p className="text-xs text-slate-500">User ID: {user.id}</p>
+                    <p className="text-xs text-slate-500 uppercase">Role: {normalizeAdminRole(user.role || "student")}</p>
+                  </div>
+                  <div className="ui-actions flex gap-2">
+                    <button className="px-3 py-1 rounded-lg bg-white border border-slate-200 text-xs font-semibold" onClick={() => showProfile(user.id)}>View</button>
+                    {canManageUsers && normalizeAdminRole(user.role) !== "main_admin" && (
+                      <button
+                        className="px-3 py-1 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-semibold"
+                        onClick={() => updateUserRole(user, normalizeAdminRole(user.role) === "sub_admin" ? "student" : "sub_admin")}
+                        disabled={savingAction === `updateRole:${user.id}`}
+                      >
+                        {normalizeAdminRole(user.role) === "sub_admin" ? "Set Student" : "Set Sub Admin"}
+                      </button>
+                    )}
+                    {canManageUsers && (
+                      <button
+                        className="px-3 py-1 rounded-lg bg-amber-50 border border-amber-100 text-amber-700 text-xs font-semibold"
+                        onClick={() => toggleUserStatus(user)}
+                        disabled={savingAction === `toggleUser:${user.id}`}
+                      >
+                        {user.enabled === false ? "Enable" : "Disable"}
+                      </button>
+                    )}
+                    {canManageUsers && (
+                      <button className="px-3 py-1 rounded-lg bg-rose-50 border border-rose-100 text-rose-700 text-xs font-semibold" onClick={() => deleteUser(user.id)} disabled={savingAction === `deleteUser:${user.id}`}>
+                        {savingAction === `deleteUser:${user.id}` ? "Deleting..." : "Delete"}
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="ui-actions flex gap-2">
-                  <button className="px-3 py-1 rounded-lg bg-white border border-slate-200 text-xs font-semibold" onClick={() => showProfile(user.id)}>View</button>
-                  {canManageUsers && normalizeAdminRole(user.role) !== "main_admin" && (
-                    <button
-                      className="px-3 py-1 rounded-lg bg-indigo-50 border border-indigo-100 text-indigo-700 text-xs font-semibold"
-                      onClick={() => updateUserRole(user, normalizeAdminRole(user.role) === "sub_admin" ? "student" : "sub_admin")}
-                      disabled={savingAction === `updateRole:${user.id}`}
-                    >
-                      {normalizeAdminRole(user.role) === "sub_admin" ? "Set Student" : "Set Sub Admin"}
-                    </button>
-                  )}
-                  {canManageUsers && (
-                    <button
-                      className="px-3 py-1 rounded-lg bg-amber-50 border border-amber-100 text-amber-700 text-xs font-semibold"
-                      onClick={() => toggleUserStatus(user)}
-                      disabled={savingAction === `toggleUser:${user.id}`}
-                    >
-                      {user.enabled === false ? "Enable" : "Disable"}
-                    </button>
-                  )}
-                  {canManageUsers && (
-                    <button className="px-3 py-1 rounded-lg bg-rose-50 border border-rose-100 text-rose-700 text-xs font-semibold" onClick={() => deleteUser(user.id)} disabled={savingAction === `deleteUser:${user.id}`}>
-                      {savingAction === `deleteUser:${user.id}` ? "Deleting..." : "Delete"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {!filteredUsers.length && !loadingSection && <div className="text-xs text-slate-500 px-1">No users found.</div>}
           </div>
           <div className="mt-3 flex items-center justify-between text-xs text-slate-600">
@@ -1678,7 +1754,7 @@ export default function AdminDashboard() {
                   <div key={`${item.user_id}-${item.course_id}`} className="flex items-center justify-between rounded-lg bg-white border border-slate-100 px-3 py-2 text-xs">
                     <div>
                       <p className="font-semibold text-slate-900">{item.user?.email || item.user_id}</p>
-                      <p className="text-slate-500">Course: {courseById.get(item.course_id)?.title || courseById.get(item.course_id)?.course_name || item.course_id}</p>
+                      <p className="text-slate-500">Course: {resolveCourseDisplayTitle(item, courseById)}</p>
                       <p className="text-slate-500">{formatDate(item.startDate)} to {formatDate(item.endDate)}</p>
                     </div>
                     <button className="px-2 py-1 rounded-lg bg-rose-50 border border-rose-100 text-rose-700 font-semibold" onClick={() => removeAllocation(item.id || `${item.user_id}_${item.course_id}`, item.user_id)} disabled={savingAction === `removeAllocation:${item.user_id}`}>
@@ -1693,7 +1769,7 @@ export default function AdminDashboard() {
           </DashboardCard>
         </div>
 
-        <DashboardCard title="Allotted Skills" subtitle="Sub admin view" icon={FiMessageSquare} accent="green">
+        <DashboardCard title="Allocated Courses" subtitle="Sub admin view" icon={FiMessageSquare} accent="green">
           <div className="space-y-3">
             {allottedSkills.map((skill) => {
               const firstTask = skill.communication?.tasks?.[0] || null;
@@ -1734,10 +1810,10 @@ export default function AdminDashboard() {
             })}
 
             {!allottedSkills.length && !allottedSkillsLoading && (
-              <p className="text-sm text-slate-500">No allotted skills found.</p>
+              <p className="text-sm text-slate-500">No allocated courses found.</p>
             )}
 
-            {allottedSkillsLoading && <p className="text-sm text-slate-500">Loading allotted skills...</p>}
+            {allottedSkillsLoading && <p className="text-sm text-slate-500">Loading allocated courses...</p>}
 
             {allottedSkillsHasMore && (
               <button
@@ -1895,9 +1971,9 @@ export default function AdminDashboard() {
     ),
     courses: (
       <div className="space-y-4">
-        <DashboardCard title="Search" subtitle="Courses" icon={FiSearch} accent="blue">
+        <DashboardCard title="Search Course Name" subtitle="Courses" icon={FiSearch} accent="blue">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-            <input value={courseSearch} onChange={(e) => setCourseSearch(e.target.value)} placeholder="Search courses" className="rounded-xl border border-slate-200 px-3 py-2" />
+            <input value={courseSearch} onChange={(e) => setCourseSearch(e.target.value)} placeholder="Search course name" className="rounded-xl border border-slate-200 px-3 py-2" />
             <select value={courseCategoryFilter} onChange={(e) => setCourseCategoryFilter(e.target.value)} className="rounded-xl border border-slate-200 px-3 py-2 bg-white">
               <option value="all">All Categories</option>
               {courseCategories.map((cat) => (
@@ -1929,8 +2005,7 @@ export default function AdminDashboard() {
                 setStatus("Course updated successfully");
                 toast.success("Course updated successfully", { containerId: "global-toasts" });
                 setEditingCourseId("");
-                invalidateDashboardCache();
-                adminApi.clearCoursesCache();
+                clearAdminCaches();
                 await loadCoursesFeed({ append: false, force: true, pageOverride: 1 });
                 return loadDashboardData(false);
               }).catch((err) => {
@@ -1943,9 +2018,8 @@ export default function AdminDashboard() {
             } else {
               return adminApi.createCourse(formData).then(async () => {
                 setStatus("Course created successfully");
-                toast.success("Course Added Successfully", { containerId: "global-toasts" });
-                invalidateDashboardCache();
-                adminApi.clearCoursesCache();
+                toast.success("Course added successfully", { containerId: "global-toasts" });
+                clearAdminCaches();
                 await loadCoursesFeed({ append: false, force: true, pageOverride: 1 });
                 return loadDashboardData(false);
               }).catch((err) => {
@@ -1964,8 +2038,7 @@ export default function AdminDashboard() {
               .then(async () => {
                 setStatus("Course deleted successfully");
                 toast.success("Course deleted successfully", { containerId: "global-toasts" });
-                invalidateDashboardCache();
-                adminApi.clearCoursesCache();
+                clearAdminCaches();
                 await loadCoursesFeed({ append: false, force: true, pageOverride: 1 });
                 return loadDashboardData(false);
               })
@@ -2122,7 +2195,7 @@ export default function AdminDashboard() {
             <div key={item.id} className="rounded-xl border border-slate-100 bg-white p-3 flex items-center justify-between">
               <div>
                 <p className="font-semibold text-slate-900">{item.userName || item.userEmail || item.user_id}</p>
-                <p className="text-xs text-slate-500">Course: {item.courseTitle || courseById.get(item.course_id)?.title || courseById.get(item.course_id)?.course_name || item.course_id} · Date: {formatDate(item.date)}</p>
+                <p className="text-xs text-slate-500">Course: {resolveCourseDisplayTitle(item, courseById)} · Date: {formatDate(item.date)}</p>
               </div>
               <span className="text-xs font-semibold px-3 py-1 rounded-full bg-slate-50 border border-slate-200 uppercase">{item.status}</span>
             </div>
@@ -2351,7 +2424,20 @@ export default function AdminDashboard() {
                 {resolvedTheme === "dark" ? <FiSun /> : <FiMoon />}
                 {resolvedTheme === "dark" ? "Light" : "Dark"}
               </button>
-              {topPanelStatus && <div className="status-banner">{topPanelStatus}</div>}
+              {topPanelStatus && (
+                <div className={`status-banner ${isOfflineStatus ? "status-banner-offline" : "status-banner-info"}`}>
+                  <span>{topPanelStatus}</span>
+                  {isOfflineStatus ? (
+                    <button
+                      type="button"
+                      onClick={() => loadSectionData(activeSection || "dashboard", true)}
+                      className="status-banner-btn"
+                    >
+                      Retry
+                    </button>
+                  ) : null}
+                </div>
+              )}
             </div>
           </header>
 

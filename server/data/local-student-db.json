@@ -29,7 +29,7 @@
           "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
           "date": "2026-04-05",
           "status": "absent",
-          "markedAt": "2026-04-06T16:36:31.054Z"
+          "markedAt": "2026-04-07T05:22:33.710Z"
         },
         {
           "id": "student-seed-1_521f975f-e38c-45ab-9844-2e1e2bbd0513_2026-04-06",
@@ -37,50 +37,7 @@
           "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
           "date": "2026-04-06",
           "status": "absent",
-          "markedAt": "2026-04-06T17:17:34.450Z"
-        }
-      ],
-      "progress": [],
-      "resources": []
-    },
-    "yIet2YzKqZhFnh7f791c8cjls8U2": {
-      "profile": {
-        "id": "yIet2YzKqZhFnh7f791c8cjls8U2",
-        "name": "",
-        "email": "vishal.ec23@bitsathy.ac.in",
-        "role": "student",
-        "enabled": true
-      },
-      "skills": [],
-      "courses": [
-        {
-          "id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
-          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
-          "status": "assigned",
-          "startDate": "2026-04-05",
-          "endDate": "2026-04-06",
-          "source": "admin",
-          "assignedAt": "2026-04-05T13:35:14.840Z",
-          "updatedAt": "2026-04-05T13:35:14.840Z"
-        }
-      ],
-      "assignments": [],
-      "attendance": [
-        {
-          "id": "yIet2YzKqZhFnh7f791c8cjls8U2_521f975f-e38c-45ab-9844-2e1e2bbd0513_2026-04-05",
-          "user_id": "yIet2YzKqZhFnh7f791c8cjls8U2",
-          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
-          "date": "2026-04-05",
-          "status": "absent",
-          "markedAt": "2026-04-06T16:36:31.054Z"
-        },
-        {
-          "id": "yIet2YzKqZhFnh7f791c8cjls8U2_521f975f-e38c-45ab-9844-2e1e2bbd0513_2026-04-06",
-          "user_id": "yIet2YzKqZhFnh7f791c8cjls8U2",
-          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
-          "date": "2026-04-06",
-          "status": "absent",
-          "markedAt": "2026-04-06T17:17:34.450Z"
+          "markedAt": "2026-04-07T05:22:33.710Z"
         }
       ],
       "progress": [],
@@ -130,11 +87,47 @@
           "addedBy": "student",
           "createdAt": "2026-04-07T04:23:35.285Z",
           "updatedAt": "2026-04-07T04:23:35.285Z"
+        },
+        {
+          "id": "773452b2-7905-4e2c-a307-154326f0b357",
+          "user_id": "tZdomt5LRuNRfgxpmLm4PlVEmg03",
+          "title": "new course",
+          "description": "",
+          "defaultDuration": 30,
+          "skillWebsites": [
+            {
+              "label": "leetcode",
+              "url": "https://leetcode.com/problemset/"
+            }
+          ],
+          "addedBy": "student",
+          "createdAt": "2026-04-21T05:11:21.854Z",
+          "updatedAt": "2026-04-21T05:11:21.854Z"
         }
       ],
-      "courses": [],
+      "courses": [
+        {
+          "id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "status": "assigned",
+          "startDate": "2026-04-07",
+          "endDate": "2026-04-08",
+          "source": "admin",
+          "assignedAt": "2026-04-07T05:22:33.582Z",
+          "updatedAt": "2026-04-07T05:22:33.582Z"
+        }
+      ],
       "assignments": [],
-      "attendance": [],
+      "attendance": [
+        {
+          "id": "tZdomt5LRuNRfgxpmLm4PlVEmg03_521f975f-e38c-45ab-9844-2e1e2bbd0513_2026-04-07",
+          "user_id": "tZdomt5LRuNRfgxpmLm4PlVEmg03",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "date": "2026-04-07",
+          "status": "absent",
+          "markedAt": "2026-04-07T09:28:56.909Z"
+        }
+      ],
       "progress": [],
       "resources": []
     },
@@ -243,6 +236,89 @@
       "courses": [],
       "assignments": [],
       "attendance": [],
+      "progress": [],
+      "resources": []
+    },
+    "debug-probe-user": {
+      "profile": {
+        "id": "debug-probe-user",
+        "name": "",
+        "email": "debug@bitsathy.ac.in",
+        "role": "student",
+        "enabled": true
+      },
+      "skills": [
+        {
+          "id": "246c7454-a9e8-46ab-b46f-f859c3d55620",
+          "user_id": "debug-probe-user",
+          "title": "Coding Practice",
+          "description": "",
+          "addedBy": "student",
+          "createdAt": "2026-04-07T07:48:20.298Z",
+          "updatedAt": "2026-04-07T07:48:20.298Z"
+        }
+      ],
+      "courses": [],
+      "assignments": [],
+      "attendance": [],
+      "progress": [],
+      "resources": []
+    },
+    "debug-student-1": {
+      "profile": {
+        "id": "debug-student-1",
+        "name": "",
+        "email": "debug@example.com",
+        "role": "student",
+        "enabled": true
+      },
+      "skills": [],
+      "courses": [],
+      "assignments": [],
+      "attendance": [],
+      "progress": [],
+      "resources": []
+    },
+    "yIet2YzKqZhFnh7f791c8cjls8U2": {
+      "profile": {
+        "id": "yIet2YzKqZhFnh7f791c8cjls8U2",
+        "name": "",
+        "email": "vishal.ec23@bitsathy.ac.in",
+        "role": "student",
+        "enabled": true
+      },
+      "skills": [],
+      "courses": [
+        {
+          "id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "status": "assigned",
+          "startDate": "2026-04-05",
+          "endDate": "2026-04-06",
+          "source": "admin",
+          "assignedAt": "2026-04-05T13:35:14.840Z",
+          "updatedAt": "2026-04-05T13:35:14.840Z"
+        }
+      ],
+      "assignments": [],
+      "attendance": [
+        {
+          "id": "yIet2YzKqZhFnh7f791c8cjls8U2_521f975f-e38c-45ab-9844-2e1e2bbd0513_2026-04-05",
+          "user_id": "yIet2YzKqZhFnh7f791c8cjls8U2",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "date": "2026-04-05",
+          "status": "absent",
+          "markedAt": "2026-04-07T05:22:33.711Z"
+        },
+        {
+          "id": "yIet2YzKqZhFnh7f791c8cjls8U2_521f975f-e38c-45ab-9844-2e1e2bbd0513_2026-04-06",
+          "user_id": "yIet2YzKqZhFnh7f791c8cjls8U2",
+          "course_id": "521f975f-e38c-45ab-9844-2e1e2bbd0513",
+          "date": "2026-04-06",
+          "status": "absent",
+          "markedAt": "2026-04-07T05:22:33.711Z"
+        }
+      ],
       "progress": [],
       "resources": []
     }

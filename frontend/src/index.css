@@ -1,5 +1,5 @@
 @import "tailwindcss";
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@500;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Space+Grotesk:wght@500;600;700&display=swap");
 
 :root {
   font-synthesis: none;
@@ -11,13 +11,17 @@
   --text-primary: #111827;
   --text-secondary: #374151;
   --text-muted: #9ca3af;
-  --text-link: #4f46e5;
+  --text-link: #6f59f8;
+  --font-body: "Plus Jakarta Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-heading: "Space Grotesk", "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
 html.theme-dark {
   color-scheme: dark;
-  --text-primary: #e5e7eb;
-  --text-secondary: #cbd5e1;
+  --text-primary: #f1f5ff;
+  --text-secondary: #c2cde8;
+  --text-muted: #95a3c2;
+  --text-link: #ad9dff;
 }
 
 * {
@@ -30,7 +34,7 @@ a {
   text-decoration: none;
 }
 a:hover {
-  color: #4338ca;
+  color: #5e4be0;
   text-decoration: underline;
 }
 
@@ -41,7 +45,7 @@ body {
   width: 100%;
   background: #f8fafc;
   color: var(--text-primary);
-  font-family: "Inter", "Poppins", "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-family: var(--font-body);
   line-height: 1.6;
 }
 
@@ -75,6 +79,7 @@ h1 {
   font-weight: 700;
   font-size: 24px;
   line-height: 1.25;
+  font-family: var(--font-heading);
 }
 
 h2,
@@ -84,6 +89,19 @@ h4 {
   font-weight: 600;
   font-size: 18px;
   line-height: 1.35;
+  font-family: var(--font-heading);
+}
+
+html.theme-dark h2,
+html.theme-dark h3,
+html.theme-dark h4 {
+  color: var(--text-primary);
+}
+
+html.theme-dark p,
+html.theme-dark span,
+html.theme-dark label {
+  color: var(--text-secondary);
 }
 
 p,

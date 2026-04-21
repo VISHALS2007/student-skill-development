@@ -98,6 +98,8 @@ export const SkillsProvider = ({ children }) => {
       },
       (err) => {
         console.error("Skills listener error", err);
+        // Mark initialized so screens can fall back to API/local data instead of infinite skeletons.
+        setInitialized(true);
         setLoading(false);
       }
     );

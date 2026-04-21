@@ -161,8 +161,11 @@ const SkillTracker = () => {
       const payload = {
         taskId: task.id,
         taskName: task.taskName,
+        skillName: task.taskName,
+        activityName: task.taskName,
         category: task.category,
         durationMinutes: task.durationMinutes,
+        autoStart: true,
       };
       sessionStorage.setItem("commSessionInfo", JSON.stringify(payload));
       navigate("/communication-session", { state: payload });

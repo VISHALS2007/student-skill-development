@@ -5,32 +5,24 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { toast } from "react-toastify";
 
-const SKILL_CATEGORIES = [
+const COURSE_CATEGORIES = [
   { id: "learning", label: "Learning" },
   { id: "aptitude", label: "Aptitude" },
   { id: "problem-solving", label: "Problem Solving" },
   { id: "communication", label: "Communication" },
-  { id: "extra", label: "Extra Skill" },
+  { id: "extra", label: "Extra Course" },
 ];
 
 const DIFFICULTY_LEVELS = ["Beginner", "Intermediate", "Advanced", "Expert"];
-
-const STATUS_OPTIONS = ["Active", "Draft"];
-
-const emptyLink = { url: "", type: "video" };
 
 const emptyCourseForm = {
   title: "",
   category: "learning",
   customCategory: "",
   description: "",
-  startDate: "",
-  endDate: "",
-  durationDays: 0,
+  defaultDuration: 30,
   difficulty: "Beginner",
   links: [],
-  websiteRef: "",
-  status: "Active",
 };
 
 function AdminCourses({
@@ -53,23 +45,6 @@ function AdminCourses({
   const [newLinkUrl, setNewLinkUrl] = useState("");
   const [coursePendingDelete, setCoursePendingDelete] = useState(null);
   const linkInputRef = useRef(null);
-
-  // Auto-calculate duration
-  const calculateDuration = (start, end) => {
-    if (!start || !end) return 0;
-    const s = new Date(start);
-    const e = new Date(end);
-    const diffMs = e - s;
-    return Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  };
-
-  const handleDateChange = (field, value) => {
-    const newForm = { ...formData, [field]: value };
-    if (field === "startDate" || field === "endDate") {
-      newForm.durationDays = calculateDuration(newForm.startDate, newForm.endDate);
-    }
-    setFormData(newForm);
-  };
 
   const handleAddLink = () => {
     if (!newLinkUrl.trim()) {
@@ -102,12 +77,7 @@ function AdminCourses({
     if (isSaving) return;
     const errors = [];
     if (!formData.title.trim()) errors.push("Course title is required");
-    if (!formData.description.trim()) errors.push("Description is required");
-    if (!formData.startDate) errors.push("Start date is required");
-    if (!formData.endDate) errors.push("End date is required");
-    if (new Date(formData.startDate) > new Date(formData.endDate)) {
-      errors.push("Start date must be before end date");
-    }
+    if ((Number(formData.defaultDuration) || 0) <= 0) errors.push("Time in minutes is required");
 
     if (errors.length > 0) {
       toast.error(errors.join("\n"), { containerId: "global-toasts" });
@@ -118,14 +88,10 @@ function AdminCourses({
       title: formData.title.trim(),
       category: formData.category === "custom" ? "custom" : formData.category,
       customCategory: formData.category === "custom" ? formData.customCategory.trim() : "",
-      description: formData.description.trim(),
-      startDate: formData.startDate,
-      endDate: formData.endDate,
-      durationDays: formData.durationDays,
+      description: formData.description.trim() || `Practice plan for ${formData.title.trim()}`,
+      defaultDuration: Math.max(1, Number(formData.defaultDuration) || 30),
       difficulty: formData.difficulty,
       links: formData.links,
-      websiteRef: formData.websiteRef.trim(),
-      status: formData.status,
     };
 
     try {
@@ -143,13 +109,9 @@ function AdminCourses({
       category: course.category || "learning",
       customCategory: course.customCategory || "",
       description: course.description || "",
-      startDate: course.startDate || "",
-      endDate: course.endDate || "",
-      durationDays: course.durationDays || 0,
+      defaultDuration: Number(course.defaultDuration) || Number(course.timeMinutes) || 30,
       difficulty: course.difficulty || "Beginner",
       links: course.links || [],
-      websiteRef: course.websiteRef || "",
-      status: course.status || "Active",
     });
     onEdit(course.id);
     setShowForm(true);
@@ -177,7 +139,7 @@ function AdminCourses({
     if (course.category === "custom") {
       return course.customCategory || "Custom";
     }
-    const found = SKILL_CATEGORIES.find((c) => c.id === course.category);
+    const found = COURSE_CATEGORIES.find((c) => c.id === course.category);
     return found?.label || course.category || "Learning";
   };
 
@@ -196,7 +158,7 @@ function AdminCourses({
       {/* FORM SECTION */}
       <DashboardCard
         title={editingId ? "Edit Course" : "Create Course"}
-        subtitle="Form"
+        subtitle="Course Form"
         icon={FiBookOpen}
         accent="indigo"
       >
@@ -207,7 +169,7 @@ function AdminCourses({
             className="ml-auto w-full sm:w-auto rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2.5 flex items-center justify-center gap-2 transition-colors"
           >
             <FiPlus className="text-lg" />
-            Create
+            Add New Course
           </button>
         ) : (
           <div className="space-y-4 max-h-[650px] overflow-y-auto pr-2">
@@ -223,11 +185,24 @@ function AdminCourses({
               />
             </div>
 
-            {/* Skill Category Selection */}
+            {/* Practice Time */}
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Skill Category *</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Time (minutes) *</label>
+              <input
+                type="number"
+                min="1"
+                max="240"
+                value={formData.defaultDuration}
+                onChange={(e) => setFormData((p) => ({ ...p, defaultDuration: Math.max(1, Number(e.target.value) || 1) }))}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+            </div>
+
+            {/* Course Category Selection */}
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Course Category *</label>
               <div className="space-y-2">
-                {SKILL_CATEGORIES.map((cat) => (
+                {COURSE_CATEGORIES.map((cat) => (
                   <label key={cat.id} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-100 hover:bg-slate-50 cursor-pointer">
                     <input
                       type="radio"
@@ -240,7 +215,7 @@ function AdminCourses({
                     <span className="text-sm text-slate-700">{cat.label}</span>
                   </label>
                 ))}
-                {/* Custom Skill */}
+                {/* Custom Course */}
                 <div className="space-y-2">
                   <label className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-100 hover:bg-slate-50 cursor-pointer">
                     <input
@@ -268,46 +243,13 @@ function AdminCourses({
 
             {/* Description */}
             <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Description *</label>
+              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Description</label>
               <textarea
                 placeholder="Description"
                 value={formData.description}
                 onChange={(e) => setFormData((p) => ({ ...p, description: e.target.value }))}
                 rows={3}
                 className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-
-            {/* Date Range */}
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">Start Date *</label>
-                <input
-                  type="date"
-                  value={formData.startDate}
-                  onChange={(e) => handleDateChange("startDate", e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-1.5">End Date *</label>
-                <input
-                  type="date"
-                  value={formData.endDate}
-                  onChange={(e) => handleDateChange("endDate", e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                />
-              </div>
-            </div>
-
-            {/* Duration (Auto-calculated) */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Duration</label>
-              <input
-                type="text"
-                value={formData.durationDays ? `${formData.durationDays} days` : "Auto"}
-                readOnly
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm bg-slate-50 text-slate-600"
               />
             </div>
 
@@ -383,38 +325,6 @@ function AdminCourses({
               </div>
             </div>
 
-            {/* Website Reference */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Website (Optional)</label>
-              <input
-                type="url"
-                placeholder="https://example.com"
-                value={formData.websiteRef}
-                onChange={(e) => setFormData((p) => ({ ...p, websiteRef: e.target.value }))}
-                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-            </div>
-
-            {/* Status */}
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-1.5">Status</label>
-              <div className="flex gap-2">
-                {STATUS_OPTIONS.map((opt) => (
-                  <label key={opt} className="flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-100 hover:bg-slate-50 cursor-pointer flex-1">
-                    <input
-                      type="radio"
-                      name="status"
-                      value={opt}
-                      checked={formData.status === opt}
-                      onChange={(e) => setFormData((p) => ({ ...p, status: e.target.value }))}
-                      className="w-4 h-4"
-                    />
-                    <span className="text-sm text-slate-700">{opt}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
             {/* Action Buttons */}
             <div className="flex items-center justify-between gap-2 pt-2">
               <button
@@ -431,7 +341,7 @@ function AdminCourses({
               >
                 {isSaving ? (
                   <span className="inline-flex items-center gap-2"><FiLoader className="animate-spin" /> Saving...</span>
-                ) : editingId ? "Save" : "Create"}
+                ) : editingId ? "Save Course" : "Add Course"}
               </button>
             </div>
 
@@ -469,9 +379,13 @@ function AdminCourses({
                 <p className="text-xs text-slate-600 line-clamp-2">{course.description}</p>
 
                 {/* Meta Info */}
-                <div className="grid grid-cols-3 gap-2 text-xs">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                   <div className="rounded-lg bg-slate-100 px-2 py-1.5">
-                    <span className="text-slate-500">Duration</span>
+                    <span className="text-slate-500">Time</span>
+                    <p className="font-semibold text-slate-900">{Number(course.defaultDuration) || Number(course.timeMinutes) || 30} min</p>
+                  </div>
+                  <div className="rounded-lg bg-slate-100 px-2 py-1.5">
+                    <span className="text-slate-500">Plan</span>
                     <p className="font-semibold text-slate-900">{course.durationDays || 0} Days</p>
                   </div>
                   <div className="rounded-lg bg-slate-100 px-2 py-1.5">

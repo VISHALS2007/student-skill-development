@@ -23,21 +23,23 @@ export default function Header({
   };
 
   return (
-    <header className="ui-card flex flex-wrap items-center justify-between px-4 sm:px-6 py-4 gap-3">
-      <div className="flex items-center gap-3 min-w-0">
+    <header className="ui-card ui-topbar flex flex-col gap-3 px-4 sm:px-6 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex w-full min-w-0 items-center gap-3 sm:w-auto">
         <button
-          className="inline-flex lg:hidden items-center justify-center p-2.5 rounded-lg border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 transition-all duration-200"
+          className="ui-icon-btn inline-flex lg:hidden items-center justify-center p-2.5 rounded-lg transition-all duration-200"
           onClick={onMenuToggle}
           aria-label="Toggle menu"
         >
           <FiMenu className="text-[20px]" />
           <span className="sr-only">{isMenuOpen ? "Close menu" : "Open menu"}</span>
         </button>
-        <div className="text-lg sm:text-xl md:text-2xl font-bold text-slate-900 leading-tight truncate">Skill Tracker</div>
+        <div className="ui-topbar-title min-w-0 truncate text-lg font-bold leading-tight text-slate-900 sm:text-xl md:text-2xl">
+          Skill Tracker
+        </div>
       </div>
 
-      <div className="flex items-center gap-2 sm:gap-3 min-w-0 ml-auto">
-        <div className="hidden md:flex items-center gap-2 px-3.5 py-2 rounded-lg bg-white border border-slate-200 text-sm text-slate-600 w-[38vw] max-w-xs lg:w-64">
+      <div className="flex w-full min-w-0 items-center justify-between gap-2 sm:w-auto sm:justify-end sm:gap-3">
+        <div className="ui-search-field hidden md:flex min-w-0 flex-1 items-center gap-2 rounded-lg px-3.5 py-2 text-sm md:max-w-[24rem] lg:w-[280px]">
           <FiSearch className="text-slate-400 text-[18px]" />
           <input
             className="bg-transparent outline-none w-full placeholder:text-slate-400"
@@ -47,24 +49,24 @@ export default function Header({
             onKeyDown={typeof onSearchSubmit === "function" ? handleKeyDown : undefined}
           />
         </div>
-        <button className="p-2.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 transition-all duration-200">
+        <button className="ui-icon-btn shrink-0 p-2.5 rounded-lg transition-all duration-200">
           <FiBell className="text-[18px]" />
         </button>
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-white border border-slate-200 min-w-0 max-w-[220px] sm:max-w-[240px]">
+        <div className="ui-profile-pill flex min-w-0 max-w-[160px] items-center gap-2 rounded-lg px-3 py-2 sm:max-w-[240px] lg:max-w-[260px]">
           {showPhoto ? (
             <img
               src={user.photoURL}
               alt="Profile"
-              className="w-9 h-9 rounded-full object-cover shrink-0"
+              className="h-9 w-9 shrink-0 rounded-full object-cover"
               onError={() => setAvatarFailed(true)}
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="w-9 h-9 rounded-full bg-indigo-100 text-indigo-600 grid place-items-center text-base font-bold shrink-0">
+            <div className="ui-avatar-fallback grid h-9 w-9 shrink-0 place-items-center rounded-full text-base font-bold">
               {avatarLetter}
             </div>
           )}
-          <div className="text-sm text-slate-700 font-medium flex items-center gap-1.5 min-w-0">
+          <div className="hidden min-w-0 items-center gap-1.5 text-sm font-medium text-slate-700 sm:flex">
             <FiUser className="text-slate-400 text-[16px] shrink-0" />
             <span className="truncate">{displayName}</span>
           </div>

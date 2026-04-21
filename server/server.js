@@ -13,6 +13,10 @@ loadEnv();
 
 const app = express();
 const port = process.env.PORT || 4000;
+const logLocalFallback = String(process.env.LOG_LOCAL_FALLBACK || "").trim().toLowerCase() === "true";
+const logStartup = String(process.env.LOG_STARTUP || (String(process.env.NODE_ENV || "").toLowerCase() === "production" ? "true" : "false"))
+  .trim()
+  .toLowerCase() === "true";
 const corsOriginsRaw = String(process.env.CORS_ORIGIN || "").trim();
 const corsOrigin = (() => {
   if (!corsOriginsRaw) return true;
@@ -39,6 +43,16 @@ ensureDefaultAdminUser()
   .then((result) => {
     if (result?.seeded) {
       console.log("Default admin user seeded in users collection");
+    } else if (result?.skipped) {
+      if (result?.reason === "firestore-not-configured") {
+        if (logLocalFallback) {
+          console.log("Admin seed skipped: Firestore is not configured; local fallback mode is active.");
+        }
+      } else if (result?.reason === "password-not-configured") {
+        console.log("Admin seed skipped: admin seed passwords are not configured.");
+      } else {
+        console.log("Admin seed skipped.");
+      }
     } else {
       console.log("Default admin user already exists");
     }
@@ -50,5 +64,7 @@ ensureDefaultAdminUser()
 startAttendanceSyncScheduler();
 
 app.listen(port, () => {
-  console.log(`Focus tracker API listening on ${port}`);
+  if (logStartup) {
+    console.log(`Focus tracker API listening on ${port}`);
+  }
 });

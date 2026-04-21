@@ -2,8 +2,13 @@ import React from "react";
 import { Navigate } from "react-router-dom";
 import { useAuth } from "../lib/AuthContext";
 
+const INTERACTIVE_LOGIN_KEY = "interactiveLogin:v1";
+
 export default function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
+  const hasInteractiveLogin =
+    typeof window !== "undefined" &&
+    String(sessionStorage.getItem(INTERACTIVE_LOGIN_KEY) || "") === "1";
 
   if (loading) {
     return (
@@ -27,5 +32,9 @@ export default function ProtectedRoute({ children }) {
     );
   }
 
-  return user ? children : <Navigate to="/login" replace />;
+  if (!user || !hasInteractiveLogin) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return children;
 }

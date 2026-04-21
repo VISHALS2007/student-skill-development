@@ -43,7 +43,7 @@ System overview with key metrics and quick access to all admin functions.
 │  DASHBOARD OVERVIEW                     │
 ├─────────────────────────────────────────┤
 │                                         │
-│  [Total Students]    [Active Learners] │
+│  [Total Students]    [Active Learners]  │
 │       248                 173           │
 │                                         │
 │  [Active Courses]    [Assignments]      │
@@ -59,8 +59,8 @@ System overview with key metrics and quick access to all admin functions.
 │  └─ → Track Progress                    │
 ├─────────────────────────────────────────┤
 │  Quick Actions                          │
-│  [Course Mgmt] [User Mgmt] [Allocation]│
-│  [Assignments] [Progress] [Attendance] │
+│  [Course Mgmt] [User Mgmt] [Allocation] │
+│  [Assignments] [Progress] [Attendance]  │
 │  [Reports]                              │
 └─────────────────────────────────────────┘
 ```

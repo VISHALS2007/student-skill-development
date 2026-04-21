@@ -102,5 +102,5 @@ export function resolveHomeRouteByRole(role) {
   const normalized = String(role || "").trim().toLowerCase();
   if (normalized === "main_admin" || normalized === "admin") return "/main-admin";
   if (normalized === "sub_admin") return "/sub-admin";
-  return "/student";
+  return "/dashboard";
 }

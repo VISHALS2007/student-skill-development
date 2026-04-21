@@ -6,6 +6,7 @@ import { useFocusTracker } from "../lib/useFocusTracker";
 import { useAuth } from "../lib/AuthContext";
 import { db } from "../firebase";
 import { msToHHMMSS } from "../lib/focusService";
+import { clearLiveTimerPin, openLiveTimerPinWindow, updateLiveTimerPin } from "../lib/liveTimerPin";
 
 // Reusable page that mirrors the Focus Session UI but allows custom site lists per skill category.
 const FocusSessionTemplate = ({
@@ -55,6 +56,7 @@ const FocusSessionTemplate = ({
   const [completedToday, setCompletedToday] = useState(false);
   const [sessionLogged, setSessionLogged] = useState(false);
   const [sessionStart, setSessionStart] = useState("");
+  const [pinBlocked, setPinBlocked] = useState(false);
 
   const formatMMSS = (ms) => {
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -171,7 +173,7 @@ const FocusSessionTemplate = ({
       const endedAt = new Date().toISOString();
       logSessionData(elapsedMs, completionStatus, startedAt, endedAt).finally(() => setSessionLogged(true));
     }
-  }, [status, sessionLogged, elapsedMs, completionStatus, logSessionData]);
+  }, [status, sessionLogged, elapsedMs, completionStatus, logSessionData, sessionStart]);
 
   const handleStart = (domain) => {
     if (completedToday) return;
@@ -182,6 +184,37 @@ const FocusSessionTemplate = ({
   };
 
   const remainingMs = Math.max(0, targetMinutes * 60 * 1000 - elapsedMs);
+
+  useEffect(() => {
+    const nextStatus = completedToday
+      ? "completed"
+      : status === "running"
+        ? "running"
+        : status === "paused"
+          ? "paused"
+          : status === "stopped"
+            ? completionStatus
+            : "idle";
+
+    updateLiveTimerPin({
+      label: title || taskKey || "Focus Session",
+      status: nextStatus,
+      remainingMs,
+      elapsedMs,
+    });
+  }, [completedToday, completionStatus, elapsedMs, remainingMs, status, taskKey, title]);
+
+  useEffect(
+    () => () => {
+      clearLiveTimerPin();
+    },
+    []
+  );
+
+  const handlePinTimer = () => {
+    const popup = openLiveTimerPinWindow();
+    setPinBlocked(!popup);
+  };
 
   return (
     <GlobalLayout>
@@ -306,7 +339,14 @@ const FocusSessionTemplate = ({
               >
                 Mark Complete
               </button>
+              <button
+                className="px-3 py-2 rounded-xl bg-slate-800 text-white text-sm font-semibold shadow hover:shadow-md transition"
+                onClick={handlePinTimer}
+              >
+                Pin Live Timer
+              </button>
             </div>
+            {pinBlocked && <p className="text-xs text-rose-600">Popup blocked. Allow popups for this site to pin the live timer.</p>}
             <p className="text-xs text-slate-500 leading-relaxed">
               Opens the chosen site in a new tab and tracks time while that tab stays open. Closing the tab stops the timer. One completion per day is recorded for this category.
             </p>

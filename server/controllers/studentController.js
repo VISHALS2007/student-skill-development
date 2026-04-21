@@ -39,6 +39,32 @@ const writeLocalStudentDb = (db) => {
 
 const getLocalStudentBucket = (db, userId, fallbackEmail = "") => {
   if (!db.users[userId]) {
+    const normalizedEmail = String(fallbackEmail || "").trim().toLowerCase();
+    const existingKey = normalizedEmail
+      ? Object.keys(db.users || {}).find((key) => {
+          const row = db.users[key] || {};
+          const rowEmail = String(row?.profile?.email || "").trim().toLowerCase();
+          return Boolean(rowEmail) && rowEmail === normalizedEmail;
+        })
+      : "";
+
+    if (existingKey) {
+      db.users[userId] = {
+        ...(db.users[existingKey] || {}),
+        profile: {
+          ...(db.users[existingKey]?.profile || {}),
+          id: userId,
+          email: db.users[existingKey]?.profile?.email || fallbackEmail,
+          role: "student",
+        },
+      };
+      if (existingKey !== userId) {
+        delete db.users[existingKey];
+      }
+    }
+  }
+
+  if (!db.users[userId]) {
     db.users[userId] = {
       profile: {
         id: userId,
@@ -54,6 +80,14 @@ const getLocalStudentBucket = (db, userId, fallbackEmail = "") => {
       resources: [],
     };
   }
+
+  if (!Array.isArray(db.users[userId].skills)) db.users[userId].skills = [];
+  if (!Array.isArray(db.users[userId].courses)) db.users[userId].courses = [];
+  if (!Array.isArray(db.users[userId].assignments)) db.users[userId].assignments = [];
+  if (!Array.isArray(db.users[userId].attendance)) db.users[userId].attendance = [];
+  if (!Array.isArray(db.users[userId].progress)) db.users[userId].progress = [];
+  if (!Array.isArray(db.users[userId].resources)) db.users[userId].resources = [];
+
   return db.users[userId];
 };
 
@@ -62,6 +96,69 @@ const toDateKey = (value) => {
   const d = typeof value?.toDate === "function" ? value.toDate() : new Date(value);
   if (Number.isNaN(d.getTime())) return "";
   return d.toISOString().slice(0, 10);
+};
+
+const normalizeDateFilter = (value) => {
+  const key = toDateKey(value);
+  return /^\d{4}-\d{2}-\d{2}$/.test(key) ? key : "";
+};
+
+const ATTENDANCE_RESPONSE_CACHE = new Map();
+const ATTENDANCE_CACHE_TTL_MS = 20 * 1000;
+
+const normalizeAttendanceLimit = (value, fallback = 120, max = 365) => {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(1, Math.min(max, Math.round(n)));
+};
+
+const buildAttendanceCacheKey = (scope, userId, { dateFilter = "", courseId = "", limit = 0 } = {}) =>
+  `${scope}::${userId}::${dateFilter || "all"}::${courseId || "all"}::${limit > 0 ? limit : "all"}`;
+
+const attendanceCacheGet = (key) => {
+  const hit = ATTENDANCE_RESPONSE_CACHE.get(key);
+  if (!hit) return null;
+  if (Date.now() > hit.expiresAt) {
+    ATTENDANCE_RESPONSE_CACHE.delete(key);
+    return null;
+  }
+  return hit.value;
+};
+
+const attendanceCacheSet = (key, value) => {
+  ATTENDANCE_RESPONSE_CACHE.set(key, {
+    value,
+    expiresAt: Date.now() + ATTENDANCE_CACHE_TTL_MS,
+  });
+};
+
+const loadCourseTitlesByIds = async (courseIds = []) => {
+  const ids = Array.from(new Set((courseIds || []).filter(Boolean)));
+  if (!ids.length) return {};
+
+  const docs = await Promise.all(ids.map((id) => firestore.collection("courses").doc(id).get()));
+  const coursesById = {};
+  docs.forEach((docSnap) => {
+    if (!docSnap.exists) return;
+    const data = docSnap.data() || {};
+    coursesById[docSnap.id] = data.title || data.course_name || "Untitled Course";
+  });
+  return coursesById;
+};
+
+const resolveCourseTitle = (course = {}, fallback = "Allocated Course") => {
+  const candidates = [course?.title, course?.course_name, course?.courseTitle, course?.name]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return candidates[0] || fallback;
+};
+
+const attendanceSummary = (rows = []) => {
+  const total = rows.length;
+  const present = rows.filter((row) => String(row.status || "").toLowerCase() === "present").length;
+  const absent = Math.max(total - present, 0);
+  const percent = total ? Math.round((present / total) * 10000) / 100 : 0;
+  return { total, present, absent, percent };
 };
 
 const todayDateKey = () => new Date().toISOString().slice(0, 10);
@@ -141,6 +238,36 @@ const normalizeSkillItem = (item = {}) => ({
   defaultDuration: normalizeDurationMinutes(item.defaultDuration, 30),
   skillWebsites: normalizeSkillWebsites(item.skillWebsites),
 });
+
+const normalizeSkillTitleKey = (value = "") => String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const hasAllocatedCourseTitleDuplicate = async (userId, titleKey = "") => {
+  if (!titleKey) return false;
+  const allocationsSnap = await firestore.collection("user_courses").where("user_id", "==", userId).get();
+  if (allocationsSnap.empty) return false;
+
+  const uniqueCourseIds = Array.from(
+    new Set(
+      allocationsSnap.docs
+        .map((docSnap) => String(docSnap.data()?.course_id || "").trim())
+        .filter(Boolean)
+    )
+  );
+
+  if (!uniqueCourseIds.length) return false;
+
+  const courseDocs = await Promise.all(
+    uniqueCourseIds.map(async (courseId) => {
+      const courseDoc = await firestore.collection("courses").doc(courseId).get();
+      return courseDoc.exists ? courseDoc.data() || {} : null;
+    })
+  );
+
+  return courseDocs.some((course) => {
+    const key = normalizeSkillTitleKey(course?.title || course?.course_name || "");
+    return key && key === titleKey;
+  });
+};
 
 export const getStudentDashboard = async (req, res) => {
   const userId = req.user.uid;
@@ -360,18 +487,40 @@ export const getStudentSkills = async (req, res) => {
   try {
     const userId = req.user.uid;
     const skillsSnapshots = await firestore.collection("user_skills").where("user_id", "==", userId).get();
-    
-    const items = [];
+
+    const dedup = new Map();
     skillsSnapshots.forEach((doc) => {
-      items.push(normalizeSkillItem({ id: doc.id, ...doc.data() }));
+      const item = normalizeSkillItem({ id: doc.id, ...doc.data() });
+      const key = normalizeSkillTitleKey(item.title || item.skillName || item.name);
+      if (!key) return;
+      const existing = dedup.get(key);
+      if (!existing) {
+        dedup.set(key, item);
+        return;
+      }
+      if (toEpoch(item.updatedAt || item.createdAt) > toEpoch(existing.updatedAt || existing.createdAt)) {
+        dedup.set(key, item);
+      }
     });
+
+    const items = Array.from(dedup.values());
 
     res.json({ items });
   } catch (err) {
     const db = readLocalStudentDb();
     const bucket = getLocalStudentBucket(db, req.user.uid, req.user.email || "");
     writeLocalStudentDb(db);
-    res.json({ items: (bucket.skills || []).map((item) => normalizeSkillItem(item)), source: "local-fallback" });
+    const dedup = new Map();
+    (bucket.skills || []).forEach((raw) => {
+      const item = normalizeSkillItem(raw);
+      const key = normalizeSkillTitleKey(item.title || item.skillName || item.name);
+      if (!key) return;
+      const existing = dedup.get(key);
+      if (!existing || toEpoch(item.updatedAt || item.createdAt) > toEpoch(existing.updatedAt || existing.createdAt)) {
+        dedup.set(key, item);
+      }
+    });
+    res.json({ items: Array.from(dedup.values()), source: "local-fallback" });
   }
 };
 
@@ -387,6 +536,22 @@ export const addStudentSkill = async (req, res) => {
 
     const nextDuration = normalizeDurationMinutes(defaultDuration, 30);
     const nextWebsites = normalizeSkillWebsites(skillWebsites);
+    const titleKey = normalizeSkillTitleKey(title);
+
+    const existingSnap = await firestore.collection("user_skills").where("user_id", "==", userId).get();
+    const duplicate = existingSnap.docs.find((docSnap) => {
+      const data = docSnap.data() || {};
+      const key = normalizeSkillTitleKey(data.title || data.skillName || data.name);
+      return key && key === titleKey;
+    });
+    if (duplicate) {
+      return res.status(409).json({ error: "Duplicate skill is not allowed" });
+    }
+
+    const allocatedDuplicate = await hasAllocatedCourseTitleDuplicate(userId, titleKey);
+    if (allocatedDuplicate) {
+      return res.status(409).json({ error: "Duplicate skill is not allowed" });
+    }
 
     const skillRef = await firestore.collection("user_skills").add({
       user_id: userId,
@@ -413,6 +578,21 @@ export const addStudentSkill = async (req, res) => {
   } catch (err) {
     const db = readLocalStudentDb();
     const bucket = getLocalStudentBucket(db, req.user.uid, req.user.email || "");
+    const titleKey = normalizeSkillTitleKey(req.body?.title);
+    const duplicate = (bucket.skills || []).some((item) => {
+      const key = normalizeSkillTitleKey(item.title || item.skillName || item.name);
+      return key && key === titleKey;
+    });
+    if (duplicate) {
+      return res.status(409).json({ error: "Duplicate skill is not allowed" });
+    }
+    const allocatedDuplicate = (bucket.courses || []).some((course) => {
+      const key = normalizeSkillTitleKey(course?.title || course?.course_name || "");
+      return key && key === titleKey;
+    });
+    if (allocatedDuplicate) {
+      return res.status(409).json({ error: "Duplicate skill is not allowed" });
+    }
     const nextDuration = normalizeDurationMinutes(req.body?.defaultDuration, 30);
     const nextWebsites = normalizeSkillWebsites(req.body?.skillWebsites);
     const item = {
@@ -445,6 +625,7 @@ export const updateStudentSkill = async (req, res) => {
 
     const nextDuration = normalizeDurationMinutes(defaultDuration, 30);
     const nextWebsites = normalizeSkillWebsites(skillWebsites);
+    const titleKey = normalizeSkillTitleKey(title);
 
     const skillDoc = await firestore.collection("user_skills").doc(skillId).get();
     if (!skillDoc.exists || skillDoc.data().user_id !== userId) {
@@ -454,6 +635,22 @@ export const updateStudentSkill = async (req, res) => {
     // Prevent editing admin-allocated skills
     if (skillDoc.data().addedBy === "admin") {
       return res.status(403).json({ error: "Cannot edit admin-allocated skills" });
+    }
+
+    const existingSnap = await firestore.collection("user_skills").where("user_id", "==", userId).get();
+    const duplicate = existingSnap.docs.find((docSnap) => {
+      if (docSnap.id === skillId) return false;
+      const data = docSnap.data() || {};
+      const key = normalizeSkillTitleKey(data.title || data.skillName || data.name);
+      return key && key === titleKey;
+    });
+    if (duplicate) {
+      return res.status(409).json({ error: "Duplicate skill is not allowed" });
+    }
+
+    const allocatedDuplicate = await hasAllocatedCourseTitleDuplicate(userId, titleKey);
+    if (allocatedDuplicate) {
+      return res.status(409).json({ error: "Duplicate skill is not allowed" });
     }
 
     await firestore.collection("user_skills").doc(skillId).update({
@@ -471,6 +668,18 @@ export const updateStudentSkill = async (req, res) => {
     const idx = bucket.skills.findIndex((s) => s.id === req.params.skillId);
     if (idx === -1) return res.status(404).json({ error: "Skill not found" });
     if (bucket.skills[idx].addedBy === "admin") return res.status(403).json({ error: "Cannot edit admin-allocated skills" });
+    const titleKey = normalizeSkillTitleKey(req.body?.title);
+    const duplicate = (bucket.skills || []).some((item, index) => {
+      if (index === idx) return false;
+      const key = normalizeSkillTitleKey(item.title || item.skillName || item.name);
+      return key && key === titleKey;
+    });
+    if (duplicate) return res.status(409).json({ error: "Duplicate skill is not allowed" });
+    const allocatedDuplicate = (bucket.courses || []).some((course) => {
+      const key = normalizeSkillTitleKey(course?.title || course?.course_name || "");
+      return key && key === titleKey;
+    });
+    if (allocatedDuplicate) return res.status(409).json({ error: "Duplicate skill is not allowed" });
     const nextDuration = normalizeDurationMinutes(req.body?.defaultDuration, bucket.skills[idx].defaultDuration || 30);
     const nextWebsites = normalizeSkillWebsites(req.body?.skillWebsites);
     bucket.skills[idx] = {
@@ -527,18 +736,41 @@ export const getStudentCourses = async (req, res) => {
       .where("user_id", "==", userId)
       .get();
 
+    const allocations = allocationsSnapshot.docs.map((docSnap) => ({
+      allocationId: docSnap.id,
+      ...(docSnap.data() || {}),
+    }));
+
+    const uniqueCourseIds = Array.from(
+      new Set(
+        allocations
+          .map((allocation) => String(allocation.course_id || "").trim())
+          .filter(Boolean)
+      )
+    );
+
+    const courseDocEntries = await Promise.all(
+      uniqueCourseIds.map(async (courseId) => {
+        const docSnap = await firestore.collection("courses").doc(courseId).get();
+        return [courseId, docSnap.exists ? docSnap.data() : null];
+      })
+    );
+    const courseById = new Map(courseDocEntries);
+
     const allocatedCourses = [];
     const registeredCourses = [];
-    for (const doc of allocationsSnapshot.docs) {
-      const allocationData = doc.data();
-      const courseDoc = await firestore.collection("courses").doc(allocationData.course_id).get();
-      
-      if (courseDoc.exists) {
-        const courseData = courseDoc.data();
+    for (const allocationData of allocations) {
+      const courseId = String(allocationData.course_id || "").trim();
+      if (!courseId) continue;
+      const courseData = courseById.get(courseId);
+      if (courseData) {
         const courseItem = {
-          id: doc.id,
+          id: allocationData.allocationId,
           ...courseData,
-          allocationId: doc.id,
+          allocationId: allocationData.allocationId,
+          title: resolveCourseTitle(courseData, "Allocated Course"),
+          courseTitle: resolveCourseTitle(courseData, "Allocated Course"),
+          course_name: String(courseData?.course_name || courseData?.title || "").trim(),
           status: allocationData.status || "active",
           startDate: allocationData.startDate,
           endDate: allocationData.endDate,
@@ -556,8 +788,33 @@ export const getStudentCourses = async (req, res) => {
     res.json({ items: [...allocatedCourses, ...registeredCourses], allocatedCourses, registeredCourses });
   } catch (err) {
     const db = readLocalStudentDb();
+    const adminDb = readLocalAdminDb();
     const bucket = getLocalStudentBucket(db, req.user.uid, req.user.email || "");
-    const allocatedCourses = Array.isArray(bucket.courses) ? bucket.courses : [];
+    const courseById = new Map((adminDb.courses || []).map((course) => [String(course.id || ""), course]));
+    const mergedCourses = (Array.isArray(bucket.courses) ? bucket.courses : []).map((course, index) => {
+      const courseId = String(course.course_id || course.id || "").trim();
+      const catalog = courseById.get(courseId) || {};
+      return {
+        id: String(course.id || `${req.user.uid}_${courseId || index}`),
+        ...catalog,
+        ...course,
+        course_id: courseId || String(catalog.id || ""),
+        title: resolveCourseTitle({ ...catalog, ...course }, courseId ? "Allocated Course" : "Allocated Course"),
+        courseTitle: resolveCourseTitle({ ...catalog, ...course }, courseId ? "Allocated Course" : "Allocated Course"),
+        course_name: String(catalog.course_name || course.course_name || catalog.title || course.title || "").trim(),
+        allocationId: String(course.allocationId || course.id || `${req.user.uid}_${courseId || index}`),
+        status: String(course.status || "assigned").toLowerCase() === "assigned" ? "active" : String(course.status || "active"),
+        startDate: course.startDate || "",
+        endDate: course.endDate || "",
+        source: course.source || "admin",
+      };
+    });
+
+    const allocatedCourses = mergedCourses.filter(
+      (course) =>
+        String(course.source || "admin").toLowerCase() !== "student" &&
+        String(course.status || "").toLowerCase() !== "registered"
+    );
     const registeredCourses = [];
     res.json({ items: [...allocatedCourses, ...registeredCourses], allocatedCourses, registeredCourses, source: "local-fallback" });
   }
@@ -678,11 +935,21 @@ export const getStudentAttendance = async (req, res) => {
   try {
     const userId = req.user.uid;
     const { courseId } = req.query;
+    const dateFilter = normalizeDateFilter(req.query?.date);
+    const hasLimitParam = req.query?.limit !== undefined;
+    const limit = hasLimitParam ? normalizeAttendanceLimit(req.query?.limit, 120) : 0;
+    const cacheKey = buildAttendanceCacheKey("student-attendance", userId, { dateFilter, courseId, limit });
+    const cached = attendanceCacheGet(cacheKey);
+    if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cached: true } });
 
     let query = firestore.collection("attendance").where("user_id", "==", userId);
 
     if (courseId) {
       query = query.where("course_id", "==", courseId);
+    }
+
+    if (dateFilter) {
+      query = query.where("date", "==", dateFilter);
     }
 
     const attendanceSnapshot = await query.get();
@@ -694,13 +961,33 @@ export const getStudentAttendance = async (req, res) => {
 
     // Sort by date descending
     items.sort((a, b) => new Date(b.date) - new Date(a.date));
+    const responseItems = !dateFilter && hasLimitParam ? items.slice(0, limit) : items;
 
-    res.json({ items });
+    const payload = {
+      items: responseItems,
+      dateFilter: dateFilter || null,
+    };
+    attendanceCacheSet(cacheKey, payload);
+
+    res.json(payload);
   } catch (err) {
     const db = readLocalStudentDb();
     const bucket = getLocalStudentBucket(db, req.user.uid, req.user.email || "");
-    const items = (bucket.attendance || []).slice().sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-    res.json({ items, source: "local-fallback" });
+    const dateFilter = normalizeDateFilter(req.query?.date);
+    const hasLimitParam = req.query?.limit !== undefined;
+    const limit = hasLimitParam ? normalizeAttendanceLimit(req.query?.limit, 120) : 0;
+    const courseIdFilter = String(req.query?.courseId || "").trim();
+    const rows = (bucket.attendance || [])
+      .filter((row) => {
+        if (courseIdFilter && String(row.course_id || row.courseId || "") !== courseIdFilter) return false;
+        const dateKey = toDateKey(row.date || "");
+        if (dateFilter && dateKey !== dateFilter) return false;
+        return true;
+      })
+      .slice()
+      .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    const items = !dateFilter && hasLimitParam ? rows.slice(0, limit) : rows;
+    res.json({ items, source: "local-fallback", dateFilter: dateFilter || null });
   }
 };
 
@@ -708,11 +995,21 @@ export const getStudentAttendance = async (req, res) => {
 export const getStudentAllocatedAttendance = async (req, res) => {
   try {
     const userId = req.user.uid;
+    const dateFilter = normalizeDateFilter(req.query?.date);
+    const hasLimitParam = req.query?.limit !== undefined;
+    const limit = hasLimitParam ? normalizeAttendanceLimit(req.query?.limit, 120) : 0;
+    const cacheKey = buildAttendanceCacheKey("student-allocated-attendance", userId, { dateFilter, limit });
+    const cached = attendanceCacheGet(cacheKey);
+    if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cached: true } });
 
-    const [userCoursesSnap, attendanceSnap, coursesSnap] = await Promise.all([
+    let attendanceQuery = firestore.collection("attendance").where("user_id", "==", userId);
+    if (dateFilter) {
+      attendanceQuery = attendanceQuery.where("date", "==", dateFilter);
+    }
+
+    const [userCoursesSnap, attendanceSnap] = await Promise.all([
       firestore.collection("user_courses").where("user_id", "==", userId).get(),
-      firestore.collection("attendance").where("user_id", "==", userId).get(),
-      firestore.collection("courses").get(),
+      attendanceQuery.get(),
     ]);
 
     const allocatedCourseIds = new Set();
@@ -725,18 +1022,22 @@ export const getStudentAllocatedAttendance = async (req, res) => {
       }
     });
 
-    const coursesById = {};
-    coursesSnap.forEach((docSnap) => {
-      const data = docSnap.data() || {};
-      coursesById[docSnap.id] = data.title || data.course_name || "Untitled Course";
-    });
+    if (!allocatedCourseIds.size) {
+      const payload = { items: [], dateFilter: dateFilter || null, summary: attendanceSummary([]) };
+      attendanceCacheSet(cacheKey, payload);
+      return res.json(payload);
+    }
+
+    const coursesById = await loadCourseTitlesByIds(Array.from(allocatedCourseIds));
 
     // Prevent duplicates: one row per (course_id, date), prioritizing present over absent.
     const deduped = new Map();
     attendanceSnap.forEach((docSnap) => {
       const row = { id: docSnap.id, ...(docSnap.data() || {}) };
       if (!row.course_id || !allocatedCourseIds.has(row.course_id)) return;
-      const dateKey = String(row.date || "");
+      const dateKey = toDateKey(row.date);
+      if (!dateKey) return;
+      if (dateFilter && dateKey !== dateFilter) return;
       const key = `${row.course_id}__${dateKey}`;
       const statusNorm = String(row.status || "absent").toLowerCase();
       const existing = deduped.get(key);
@@ -754,15 +1055,25 @@ export const getStudentAllocatedAttendance = async (req, res) => {
       id: row.id,
       courseId: row.course_id,
       courseName: coursesById[row.course_id] || row.course_id,
-      date: row.date,
+      date: toDateKey(row.date),
       status: String(row.status || "absent").toLowerCase() === "present" ? "present" : "absent",
     }));
 
     items.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-    res.json({ items });
+    const responseItems = !dateFilter && hasLimitParam ? items.slice(0, limit) : items;
+    const payload = {
+      items: responseItems,
+      dateFilter: dateFilter || null,
+      summary: attendanceSummary(items),
+    };
+    attendanceCacheSet(cacheKey, payload);
+    res.json(payload);
   } catch (err) {
     const db = readLocalStudentDb();
     const bucket = getLocalStudentBucket(db, req.user.uid, req.user.email || "");
+    const dateFilter = normalizeDateFilter(req.query?.date);
+    const hasLimitParam = req.query?.limit !== undefined;
+    const limit = hasLimitParam ? normalizeAttendanceLimit(req.query?.limit, 120) : 0;
     const allocatedCourseIds = new Set(
       (bucket.courses || [])
         .filter((c) => String(c.source || "admin").toLowerCase() !== "student")
@@ -774,8 +1085,9 @@ export const getStudentAllocatedAttendance = async (req, res) => {
     (bucket.attendance || []).forEach((row) => {
       const courseId = row.course_id || row.courseId;
       if (!courseId || !allocatedCourseIds.has(courseId)) return;
-      const date = row.date || "";
+      const date = toDateKey(row.date || "");
       if (!date) return;
+      if (dateFilter && date !== dateFilter) return;
       const key = `${courseId}__${date}`;
       const status = String(row.status || "absent").toLowerCase() === "present" ? "present" : "absent";
       const existing = dedup.get(key);
@@ -790,8 +1102,9 @@ export const getStudentAllocatedAttendance = async (req, res) => {
       }
     });
 
-    const items = Array.from(dedup.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-    res.json({ items, source: "local-fallback" });
+    const rows = Array.from(dedup.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    const items = !dateFilter && hasLimitParam ? rows.slice(0, limit) : rows;
+    res.json({ items, source: "local-fallback", dateFilter: dateFilter || null, summary: attendanceSummary(rows) });
   }
 };
 
@@ -799,24 +1112,118 @@ export const getStudentAllocatedAttendance = async (req, res) => {
 export const getStudentMySkillsAttendance = async (req, res) => {
   try {
     const userId = req.user.uid;
+    const dateFilter = normalizeDateFilter(req.query?.date);
+    const hasLimitParam = req.query?.limit !== undefined;
+    const limit = hasLimitParam ? normalizeAttendanceLimit(req.query?.limit, 120) : 0;
+    const cacheKey = buildAttendanceCacheKey("student-myskills-attendance", userId, { dateFilter, limit });
+    const cached = attendanceCacheGet(cacheKey);
+    if (cached) return res.json({ ...cached, meta: { ...(cached.meta || {}), cached: true } });
 
-    const [skillsSnap, attendanceDailySnap] = await Promise.all([
+    const attendancePromise = dateFilter
+      ? firestore.collection("users").doc(userId).collection("attendance").doc(dateFilter).get()
+      : firestore
+          .collection("users")
+          .doc(userId)
+          .collection("attendance")
+          .orderBy("__name__", "desc")
+          .limit(hasLimitParam ? limit : 365)
+          .get();
+
+    const flatAttendancePromise = (async () => {
+      let flatAttendanceQuery = firestore.collection("attendance").where("user_id", "==", userId);
+      if (dateFilter) {
+        flatAttendanceQuery = flatAttendanceQuery.where("date", "==", dateFilter);
+        return flatAttendanceQuery.get();
+      }
+
+      try {
+        const rowLimit = hasLimitParam ? limit * 4 : 1500;
+        return await flatAttendanceQuery.orderBy("date", "desc").limit(rowLimit).get();
+      } catch (queryErr) {
+        const errCode = String(queryErr?.code || "").toLowerCase();
+        const errText = String(queryErr?.message || "").toLowerCase();
+        const maybeMissingIndex =
+          errCode.includes("failed-precondition") || errText.includes("index") || errText.includes("order by");
+        if (!maybeMissingIndex) throw queryErr;
+        return flatAttendanceQuery.get();
+      }
+    })();
+
+    const [legacySkillsSnap, userSkillsSnap, attendanceDailySource, flatAttendanceSnap] = await Promise.all([
       firestore.collection("users").doc(userId).collection("skills").get(),
-      firestore.collection("users").doc(userId).collection("attendance").get(),
+      firestore.collection("user_skills").where("user_id", "==", userId).get(),
+      attendancePromise,
+      flatAttendancePromise,
     ]);
 
+    const attendanceDocs = [];
+    if (dateFilter) {
+      if (attendanceDailySource?.exists) attendanceDocs.push(attendanceDailySource);
+    } else {
+      attendanceDailySource.forEach((docSnap) => {
+        attendanceDocs.push(docSnap);
+      });
+    }
+
     const skillsByName = new Map();
-    skillsSnap.forEach((docSnap) => {
+    const skillsById = new Map();
+    const registerSkill = (skillId, rawName, createdAtValue = "") => {
+      const id = String(skillId || "").trim();
+      const name = String(rawName || "").trim();
+      if (!id || !name) return;
+      const key = name.toLowerCase();
+      const createdAt = toDateKey(createdAtValue);
+      if (!skillsByName.has(key)) {
+        skillsByName.set(key, { id, name });
+      }
+      if (!skillsById.has(id)) {
+        skillsById.set(id, { id, name, createdAt });
+        return;
+      }
+      const existing = skillsById.get(id) || { id, name: "", createdAt: "" };
+      skillsById.set(id, {
+        id,
+        name: existing.name || name,
+        createdAt: existing.createdAt || createdAt,
+      });
+    };
+
+    // Legacy source used by older frontends.
+    legacySkillsSnap.forEach((docSnap) => {
       const data = docSnap.data() || {};
-      const name = String(data.skillName || "").trim();
-      if (!name) return;
-      skillsByName.set(name.toLowerCase(), { id: docSnap.id, name });
+      registerSkill(docSnap.id, data.skillName || data.title || data.name, data.createdAt || data.updatedAt || "");
+    });
+
+    // Primary source used by student skill APIs.
+    userSkillsSnap.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      const addedBy = String(data.addedBy || data.source || "student").toLowerCase();
+      if (addedBy === "admin") return;
+      registerSkill(docSnap.id, data.title || data.skillName || data.name, data.createdAt || data.updatedAt || "");
     });
 
     const deduped = new Map();
-    attendanceDailySnap.forEach((docSnap) => {
+    const upsertAttendanceRow = ({ skillId, skillName, date, status }) => {
+      if (!skillId || !date) return;
+      const key = `${skillId}__${date}`;
+      const normalizedStatus = String(status || "absent").toLowerCase() === "present" ? "present" : "absent";
+      const existing = deduped.get(key);
+      if (!existing || (existing.status !== "present" && normalizedStatus === "present")) {
+        deduped.set(key, {
+          id: key,
+          skillId,
+          skillName,
+          date,
+          status: normalizedStatus,
+        });
+      }
+    };
+
+    attendanceDocs.forEach((docSnap) => {
       const data = docSnap.data() || {};
-      const date = data.date || docSnap.id;
+      const date = toDateKey(data.date || docSnap.id);
+      if (!date) return;
+      if (dateFilter && date !== dateFilter) return;
       const done = Array.isArray(data.completedSkills) ? data.completedSkills : [];
       const missed = Array.isArray(data.incompleteSkills) ? data.incompleteSkills : [];
 
@@ -825,9 +1232,7 @@ export const getStudentMySkillsAttendance = async (req, res) => {
         if (!normalized) return;
         const skillMeta = skillsByName.get(normalized);
         if (!skillMeta) return;
-        const key = `${skillMeta.id}__${date}`;
-        deduped.set(key, {
-          id: key,
+        upsertAttendanceRow({
           skillId: skillMeta.id,
           skillName: skillMeta.name,
           date,
@@ -840,27 +1245,178 @@ export const getStudentMySkillsAttendance = async (req, res) => {
         if (!normalized) return;
         const skillMeta = skillsByName.get(normalized);
         if (!skillMeta) return;
-        const key = `${skillMeta.id}__${date}`;
-        // Do not overwrite a present row for the same skill/date.
-        if (!deduped.has(key)) {
-          deduped.set(key, {
-            id: key,
-            skillId: skillMeta.id,
-            skillName: skillMeta.name,
-            date,
-            status: "absent",
-          });
-        }
+        upsertAttendanceRow({
+          skillId: skillMeta.id,
+          skillName: skillMeta.name,
+          date,
+          status: "absent",
+        });
+      });
+    });
+
+    // Also include my-skills attendance rows persisted in the flat attendance collection.
+    flatAttendanceSnap.forEach((docSnap) => {
+      const row = docSnap.data() || {};
+      const date = toDateKey(row.date);
+      if (!date) return;
+      if (dateFilter && date !== dateFilter) return;
+      const skillId = String(row.skillId || row.skill_id || row.courseId || row.course_id || "").trim();
+      if (!skillId || !skillsById.has(skillId)) return;
+      const skillMeta = skillsById.get(skillId);
+      upsertAttendanceRow({
+        skillId,
+        skillName: skillMeta?.name || skillId,
+        date,
+        status: row.status,
+      });
+    });
+
+    const datesToBackfill = new Set();
+    if (dateFilter) {
+      datesToBackfill.add(dateFilter);
+    }
+    attendanceDocs.forEach((docSnap) => {
+      const data = docSnap.data() || {};
+      const date = toDateKey(data.date || docSnap.id);
+      if (!date) return;
+      if (dateFilter && date !== dateFilter) return;
+      datesToBackfill.add(date);
+    });
+    if (!dateFilter) {
+      deduped.forEach((row) => {
+        const date = toDateKey(row.date);
+        if (date) datesToBackfill.add(date);
+      });
+    }
+
+    datesToBackfill.forEach((date) => {
+      skillsById.forEach((meta, skillId) => {
+        if (!skillId) return;
+        if (meta?.createdAt && meta.createdAt > date) return;
+        const key = `${skillId}__${date}`;
+        if (deduped.has(key)) return;
+        deduped.set(key, {
+          id: key,
+          skillId,
+          skillName: meta?.name || skillId,
+          date,
+          status: "absent",
+        });
       });
     });
 
     const items = Array.from(deduped.values());
     items.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
-    res.json({ items });
+    const responseItems = !dateFilter && hasLimitParam ? items.slice(0, limit) : items;
+    const payload = {
+      items: responseItems,
+      dateFilter: dateFilter || null,
+      summary: attendanceSummary(items),
+    };
+    attendanceCacheSet(cacheKey, payload);
+    res.json(payload);
   } catch (err) {
     const db = readLocalStudentDb();
     const bucket = getLocalStudentBucket(db, req.user.uid, req.user.email || "");
-    res.json({ items: bucket.attendance || [], source: "local-fallback" });
+    const dateFilter = normalizeDateFilter(req.query?.date);
+    const hasLimitParam = req.query?.limit !== undefined;
+    const limit = hasLimitParam ? normalizeAttendanceLimit(req.query?.limit, 120) : 0;
+    const skillsById = new Map();
+    const skillsByName = new Map();
+    (bucket.skills || []).forEach((row) => {
+      const addedBy = String(row.addedBy || row.source || "student").toLowerCase();
+      if (addedBy === "admin") return;
+      const skillId = String(row.id || row.skillId || row.skill_id || "").trim();
+      const skillName = String(row.title || row.skillName || row.skill_name || "").trim();
+      if (!skillId || !skillName) return;
+      skillsById.set(skillId, {
+        name: skillName,
+        createdAt: toDateKey(row.createdAt || row.updatedAt || ""),
+      });
+      if (!skillsByName.has(skillName.toLowerCase())) {
+        skillsByName.set(skillName.toLowerCase(), { id: skillId, name: skillName });
+      }
+    });
+
+    const dedup = new Map();
+    const upsert = ({ skillId, skillName, date, status }) => {
+      if (!skillId || !date) return;
+      if (dateFilter && date !== dateFilter) return;
+      const key = `${skillId}__${date}`;
+      const normalizedStatus = String(status || "absent").toLowerCase() === "present" ? "present" : "absent";
+      const existing = dedup.get(key);
+      if (!existing || (existing.status !== "present" && normalizedStatus === "present")) {
+        dedup.set(key, {
+          id: key,
+          skillId,
+          skillName,
+          date,
+          status: normalizedStatus,
+        });
+      }
+    };
+
+    (bucket.attendance || []).forEach((row, index) => {
+      const date = toDateKey(row.date);
+      if (!date) return;
+
+      const directSkillId = String(row.skillId || row.skill_id || row.courseId || row.course_id || "").trim();
+      const directSkillName = String(row.skillName || row.skill_name || "").trim();
+
+      if (directSkillId && skillsById.has(directSkillId)) {
+        const skillMeta = skillsById.get(directSkillId) || { name: directSkillId };
+        upsert({
+          skillId: directSkillId,
+          skillName: skillMeta.name || directSkillId,
+          date,
+          status: row.status,
+        });
+        return;
+      }
+
+      if (directSkillName) {
+        const skillMeta = skillsByName.get(directSkillName.toLowerCase());
+        if (!skillMeta) return;
+        upsert({
+          skillId: skillMeta.id || `local-skill-${index}`,
+          skillName: skillMeta.name,
+          date,
+          status: row.status,
+        });
+      }
+    });
+
+    const datesToBackfill = new Set();
+    if (dateFilter) {
+      datesToBackfill.add(dateFilter);
+    }
+    if (!dateFilter) {
+      dedup.forEach((row) => {
+        const date = toDateKey(row.date);
+        if (date) datesToBackfill.add(date);
+      });
+    }
+
+    datesToBackfill.forEach((date) => {
+      skillsById.forEach((meta, skillId) => {
+        if (!skillId) return;
+        if (meta?.createdAt && meta.createdAt > date) return;
+        const key = `${skillId}__${date}`;
+        if (dedup.has(key)) return;
+        dedup.set(key, {
+          id: key,
+          skillId,
+          skillName: meta?.name || skillId,
+          date,
+          status: "absent",
+        });
+      });
+    });
+
+    const rows = Array.from(dedup.values()).sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    const items = !dateFilter && hasLimitParam ? rows.slice(0, limit) : rows;
+
+    res.json({ items, source: "local-fallback", dateFilter: dateFilter || null, summary: attendanceSummary(rows) });
   }
 };
 

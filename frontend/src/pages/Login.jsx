@@ -1,10 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { auth, provider } from "../firebase";
 import { signInWithEmailAndPassword, signInWithPopup, signInWithRedirect, signOut } from "firebase/auth";
 import { useNavigate } from "react-router-dom";
 import { Link } from "react-router-dom";
 import { toast } from "react-toastify";
-import { useAuth } from "../lib/AuthContext";
 import { ensureUserProfile, getUserProfile, resolveHomeRouteByRole } from "../lib/roleHelpers";
 import { adminApi } from "../lib/adminApi";
 import { COLLEGE_EMAIL_ERROR, isCollegeEmail, normalizeEmail } from "../lib/emailPolicy";
@@ -19,6 +18,7 @@ const DEFAULT_ADMIN_EMAIL = "admin@skilldev.com";
 const DEFAULT_ADMIN_PASSWORD = "admin123";
 const DEFAULT_SUB_ADMIN_EMAIL = "subadmin@skilldev.com";
 const DEFAULT_SUB_ADMIN_PASSWORD = "subadmin123";
+const INTERACTIVE_LOGIN_KEY = "interactiveLogin:v1";
 
 const normalizeRole = (role = "") => {
   const normalized = String(role || "").trim().toLowerCase();
@@ -111,55 +111,32 @@ const withTimeout = (promise, timeoutMs = 1200) => {
   ]);
 };
 
+const markInteractiveLogin = () => {
+  try {
+    sessionStorage.setItem(INTERACTIVE_LOGIN_KEY, "1");
+  } catch {
+    // Ignore session storage failures.
+  }
+};
+
+const clearInteractiveLogin = () => {
+  try {
+    sessionStorage.removeItem(INTERACTIVE_LOGIN_KEY);
+  } catch {
+    // Ignore session storage failures.
+  }
+};
+
 export default function Login() {
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const navigate = useNavigate();
-  const { user, loading: authLoading } = useAuth();
   const isBusy = loading || googleLoading;
 
   const heroSrc = heroIllustration;
   const heroFallback = "https://drive.google.com/uc?export=view&id=1awP1ywNpWk3A6mNLbSOvr6EXSOfYY7M7";
-
-  useEffect(() => {
-    if (authLoading || !user) return;
-    let active = true;
-    const redirectByRole = async () => {
-      try {
-        const profile = await ensureUserProfile(user, {
-          name: user.displayName || "",
-          email: normalizeEmail(user.email || ""),
-          role: "student",
-          enabled: true,
-        });
-        const role = profile?.role || "student";
-        const home = resolveHomeRouteByRole(role);
-        if (active) navigate(home, { replace: true });
-      } catch {
-        if (active) navigate("/dashboard", { replace: true });
-      }
-    };
-    redirectByRole();
-    return () => {
-      active = false;
-    };
-  }, [authLoading, user, navigate]);
-
-  if (authLoading) {
-    return (
-      <div className="auth-container">
-        <div className="auth-card">
-          <div className="auth-header">
-            <img src={logo} alt="Skills Development logo" className="logo-img" />
-            <div className="app-title">Skills Development</div>
-          </div>
-          <p className="auth-sub">Checking session...</p>
-        </div>
-      </div>
-    );
-  }
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -218,6 +195,7 @@ export default function Login() {
     setLoading(true);
     try {
       clearAdminSession();
+      clearInteractiveLogin();
 
       const loginStudent = async () => {
         const credential = await signInWithEmailAndPassword(auth, normalizedEmail, normalizedPassword);
@@ -230,14 +208,16 @@ export default function Login() {
           if (isAdminRole(role)) {
             persistAdminSession(normalizedEmail, role);
           }
+          markInteractiveLogin();
           toast.success("Welcome back!", { containerId: "global-toasts" });
           navigate(resolveHomeRouteByRole(role), { replace: true });
           return;
         }
 
         // Fast path: continue to student home while profile checks finish in background.
+        markInteractiveLogin();
         toast.success("Welcome back!", { containerId: "global-toasts" });
-        navigate("/student", { replace: true });
+        navigate("/dashboard", { replace: true });
 
         profilePromise
           .then(async (profile) => {
@@ -347,6 +327,7 @@ export default function Login() {
     setError("");
     try {
       clearAdminSession();
+      clearInteractiveLogin();
 
       const result = await signInWithPopup(auth, buildGoogleProvider());
       const current = result?.user;
@@ -362,30 +343,58 @@ export default function Login() {
         return;
       }
 
-      const profile = await ensureUserProfile(current, {
-        name: current?.displayName || "",
-        email: normalizedEmail,
-        role: "student",
-        enabled: true,
-      });
+      const profilePromise = enforceRegisteredStudent(current);
+      const quickProfile = await withTimeout(profilePromise, 900);
 
-      if (profile?.enabled === false) {
-        await signOut(auth).catch(() => {
-          // Ignore forced sign-out errors.
-        });
-        const disabledMessage = "Your account is disabled. Contact admin.";
-        setError(disabledMessage);
-        toast.error(disabledMessage, { containerId: "global-toasts" });
+      if (quickProfile) {
+        const role = normalizeRole(quickProfile?.role || "student");
+        if (isAdminRole(role)) {
+          persistAdminSession(normalizedEmail, role);
+        }
+        markInteractiveLogin();
+        toast.success("Welcome back!", { containerId: "global-toasts" });
+        navigate(resolveHomeRouteByRole(role), { replace: true });
         return;
       }
 
-      const role = normalizeRole(profile?.role || "student");
-      if (isAdminRole(role)) {
-        persistAdminSession(normalizedEmail, role);
-      }
-
+      markInteractiveLogin();
       toast.success("Welcome back!", { containerId: "global-toasts" });
-      navigate(resolveHomeRouteByRole(role), { replace: true });
+      navigate("/dashboard", { replace: true });
+
+      profilePromise
+        .then(async (profile) => {
+          const role = normalizeRole(profile?.role || "student");
+          if (profile?.enabled === false) {
+            await signOut(auth).catch(() => {
+              // Ignore forced sign-out errors.
+            });
+            clearInteractiveLogin();
+            const disabledMessage = "Your account is disabled. Contact admin.";
+            setError(disabledMessage);
+            toast.error(disabledMessage, { containerId: "global-toasts" });
+            navigate("/login", { replace: true });
+            return;
+          }
+
+          if (isAdminRole(role)) {
+            persistAdminSession(normalizedEmail, role);
+            navigate(resolveHomeRouteByRole(role), { replace: true });
+          }
+        })
+        .catch(async (profileErr) => {
+          const code = String(profileErr?.code || "");
+          const msg = String(profileErr?.message || "");
+          const shouldForceLogout = code === "You are not registered" || msg.toLowerCase().includes("not registered");
+          if (!shouldForceLogout) return;
+
+          await signOut(auth).catch(() => {
+            // Ignore forced sign-out errors.
+          });
+          clearInteractiveLogin();
+          setError("You are not registered");
+          toast.error("You are not registered", { containerId: "global-toasts" });
+          navigate("/login", { replace: true });
+        });
     } catch (err) {
       if (err?.code === "auth/popup-blocked" || err?.code === "auth/cancelled-popup-request") {
         try {

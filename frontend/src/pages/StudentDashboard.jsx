@@ -26,12 +26,13 @@ import ConfirmDialog from "../components/ConfirmDialog";
 import CountUpValue from "../components/CountUpValue";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useTheme } from "../lib/ThemeContext";
+import { apiRequestWithFallback } from "../lib/apiClient";
 import { toast } from "react-toastify";
 
 const navItems = [
   { id: "dashboard", label: "Dashboard", icon: FiActivity },
-  { id: "skills", label: "My Skills", icon: FiTarget },
-  { id: "addSkill", label: "Add Skill", icon: FiPlus },
+  { id: "skills", label: "My Courses", icon: FiTarget },
+  { id: "addSkill", label: "Add Course", icon: FiPlus },
   { id: "courses", label: "My Courses", icon: FiBookOpen },
   { id: "assignments", label: "Assessments", icon: FiEdit3 },
   { id: "communication", label: "Communication", icon: FiMessageSquare },
@@ -51,23 +52,23 @@ const formatDate = (value) => {
   return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 };
 
-const configuredApiBase = String(import.meta.env.VITE_API_BASE || "").trim().replace(/\/$/, "");
-const configuredApiHost = (() => {
-  if (!configuredApiBase) return "";
-  try {
-    const parsed = new URL(configuredApiBase);
-    return `${parsed.protocol}//${parsed.host}`;
-  } catch {
-    return configuredApiBase.replace(/\/api$/i, "");
-  }
-})();
-
-const API_HOSTS = Array.from(new Set([configuredApiHost, "", "http://localhost:4000", "http://localhost:5000"].filter(Boolean)));
-const RETRYABLE_STATUS = new Set([404, 408, 429, 500, 502, 503, 504]);
 const STUDENT_DASHBOARD_CACHE_KEY = "studentDashboardCache:v1";
 const STUDENT_DASHBOARD_CACHE_TTL_MS = 30000;
 const COURSES_PAGE_SIZE = 6;
 const IN_FLIGHT_GET_REQUESTS = new Map();
+
+const getQuickToken = async (user, timeoutMs = 700) => {
+  if (!user || typeof user.getIdToken !== "function") return "";
+  try {
+    const token = await Promise.race([
+      user.getIdToken(),
+      new Promise((resolve) => setTimeout(() => resolve(""), timeoutMs)),
+    ]);
+    return typeof token === "string" ? token : "";
+  } catch {
+    return "";
+  }
+};
 
 const requestWithFallback = async (path, options = {}, timeoutMs = 8000) => {
   const method = String(options?.method || "GET").toUpperCase();
@@ -79,41 +80,14 @@ const requestWithFallback = async (path, options = {}, timeoutMs = 8000) => {
   }
 
   const task = (async () => {
-    let lastError = null;
-
-    for (const host of API_HOSTS) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const response = await fetch(`${host}${path}`, {
-          ...options,
-          method,
-          signal: controller.signal,
-        });
-        const payload = await response.json().catch(() => ({}));
-
-        if (!response.ok) {
-          const error = new Error(payload?.error || `Request failed (${response.status})`);
-          error.status = response.status;
-          if (RETRYABLE_STATUS.has(Number(response.status))) {
-            lastError = error;
-            continue;
-          }
-          throw error;
-        }
-
-        return payload;
-      } catch (err) {
-        if (err?.status && !RETRYABLE_STATUS.has(Number(err.status))) {
-          throw err;
-        }
-        lastError = err;
-      } finally {
-        clearTimeout(timer);
+    return apiRequestWithFallback(
+      path,
+      { ...options, method },
+      {
+        timeoutMs,
+        networkErrorMessage: "Cannot connect to backend server. Start backend: cd server ; npm run dev",
       }
-    }
-
-    throw new Error(lastError?.message || "Cannot connect to backend server");
+    );
   })();
 
   if (isGet && dedupeKey) {
@@ -186,6 +160,14 @@ export default function StudentDashboard() {
   const [communicationDrafts, setCommunicationDrafts] = useState({});
   const [communicationLoading, setCommunicationLoading] = useState(false);
 
+  const clearStudentDashboardCache = useCallback(() => {
+    try {
+      sessionStorage.removeItem(STUDENT_DASHBOARD_CACHE_KEY);
+    } catch {
+      // ignore cache delete errors
+    }
+  }, []);
+
   const applyDashboardPayload = useCallback((data = {}) => {
     const profile = data.profile || {};
     const skillsData = Array.isArray(data.skills) ? data.skills : [];
@@ -234,17 +216,20 @@ export default function StudentDashboard() {
     return () => clearTimeout(timer);
   }, [courseSearch]);
 
-  // Fetch student data on mount
-  useEffect(() => {
-    const loadStudentData = async () => {
-      try {
-        const currentUser = auth.currentUser;
-        if (!currentUser) {
-          navigate("/login");
-          return;
-        }
+  const loadStudentData = useCallback(async ({ allowCache = true, showLoader = true } = {}) => {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        navigate("/login");
+        return;
+      }
 
-        let hasFreshCache = false;
+      let hasFreshCache = false;
+      if (!allowCache) {
+        clearStudentDashboardCache();
+      }
+
+      if (allowCache) {
         try {
           const cachedRaw = sessionStorage.getItem(STUDENT_DASHBOARD_CACHE_KEY);
           if (cachedRaw) {
@@ -252,107 +237,118 @@ export default function StudentDashboard() {
             if (cached?.ts && Date.now() - cached.ts < STUDENT_DASHBOARD_CACHE_TTL_MS && cached?.item) {
               applyDashboardPayload(cached.item);
               hasFreshCache = true;
-              setIsLoading(false);
+              if (showLoader) setIsLoading(false);
             }
           }
         } catch {
           // ignore cache parse errors
         }
+      }
 
-        if (!hasFreshCache) {
-          setIsLoading(true);
-        }
+      if (showLoader && !hasFreshCache) {
+        setIsLoading(true);
+      }
 
-        // Always show the currently logged-in identity in the student panel.
-        setStudent((prev) => ({
-          ...(prev || {}),
-          name: (prev && prev.name) || loggedInName,
-          email: (prev && prev.email) || loggedInEmail,
-        }));
+      // Always show the currently logged-in identity in the student panel.
+      setStudent((prev) => ({
+        ...(prev || {}),
+        name: (prev && prev.name) || loggedInName,
+        email: (prev && prev.email) || loggedInEmail,
+      }));
 
-        const idToken = await currentUser.getIdToken();
-        const headers = {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${idToken}`,
-          "x-student-session": JSON.stringify({ uid: currentUser.uid, email: currentUser.email || "", role: "student" }),
-        };
+      const headers = {
+        "Content-Type": "application/json",
+        "x-student-session": JSON.stringify({ uid: currentUser.uid, email: currentUser.email || "", role: "student" }),
+      };
+      const idToken = await getQuickToken(currentUser);
+      if (idToken) {
+        headers.Authorization = `Bearer ${idToken}`;
+      }
 
-        const fetchJson = async (url) => requestWithFallback(url, { headers });
+      const fetchJson = async (url) => requestWithFallback(url, { headers });
 
-        // Fast path: load all dashboard data in a single API call.
+      // Fast path: load all dashboard data in a single API call.
+      try {
+        const bundle = await fetchJson("/api/student/dashboard");
+        const data = bundle?.item || {};
+        applyDashboardPayload(data);
         try {
-          const bundle = await fetchJson("/api/student/dashboard");
-          const data = bundle?.item || {};
-          applyDashboardPayload(data);
-          try {
-            sessionStorage.setItem(STUDENT_DASHBOARD_CACHE_KEY, JSON.stringify({ ts: Date.now(), item: data }));
-          } catch {
-            // ignore cache write errors
-          }
-          setStatus("");
-          return;
+          sessionStorage.setItem(STUDENT_DASHBOARD_CACHE_KEY, JSON.stringify({ ts: Date.now(), item: data }));
         } catch {
-          // Fallback to legacy parallel endpoints for backward compatibility.
+          // ignore cache write errors
         }
+        setStatus("");
+        return;
+      } catch {
+        // Fallback to legacy parallel endpoints for backward compatibility.
+      }
 
-        const [studentRes, skillsRes, coursesRes, assignmentsRes, attendanceRes, progressRes, resourcesRes] = await Promise.allSettled([
-          fetchJson("/api/student/profile"),
-          fetchJson("/api/student/skills"),
-          fetchJson("/api/student/courses"),
-          fetchJson("/api/student/assessments"),
-          fetchJson("/api/student/attendance"),
-          fetchJson("/api/student/progress"),
-          fetchJson("/api/student/resources"),
-        ]);
+      const [studentRes, skillsRes, coursesRes, assignmentsRes, attendanceRes, progressRes, resourcesRes] = await Promise.allSettled([
+        fetchJson("/api/student/profile"),
+        fetchJson("/api/student/skills"),
+        fetchJson("/api/student/courses"),
+        fetchJson("/api/student/assessments"),
+        fetchJson("/api/student/attendance"),
+        fetchJson("/api/student/progress"),
+        fetchJson("/api/student/resources"),
+      ]);
 
-        if (studentRes.status === "fulfilled") {
-          const item = studentRes.value?.item || {};
-          setStudent({
-            ...item,
-            name: item.name || loggedInName,
-            email: item.email || loggedInEmail,
-          });
-        }
-        
-        // Separate allocated skills (admin-given) and personal skills (student-added)
-        if (skillsRes.status === "fulfilled") {
-          const skillsData = skillsRes.value?.items || [];
-          const splitSkills = splitSkillsByOwner(skillsData);
-          setAllocatedSkills(splitSkills.allocated);
-          setMySkills(splitSkills.personal);
-        }
+      if (studentRes.status === "fulfilled") {
+        const item = studentRes.value?.item || {};
+        setStudent({
+          ...item,
+          name: item.name || loggedInName,
+          email: item.email || loggedInEmail,
+        });
+      }
 
-        if (coursesRes.status === "fulfilled") {
-          const allocated = coursesRes.value?.allocatedCourses || [];
-          const registered = coursesRes.value?.registeredCourses || [];
-          const combinedCourses = coursesRes.value?.items || [...allocated, ...registered];
-          setCourses(combinedCourses);
-          setAllocatedCourses(allocated.length ? allocated : combinedCourses.filter((course) => String(course.source || "admin").toLowerCase() !== "student" && String(course.status || "").toLowerCase() !== "registered"));
-          setRegisteredCourses(registered.length ? registered : combinedCourses.filter((course) => String(course.source || "").toLowerCase() === "student" || String(course.status || "").toLowerCase() === "registered"));
-        }
+      // Separate allocated skills (admin-given) and personal skills (student-added)
+      if (skillsRes.status === "fulfilled") {
+        const skillsData = skillsRes.value?.items || [];
+        const splitSkills = splitSkillsByOwner(skillsData);
+        setAllocatedSkills(splitSkills.allocated);
+        setMySkills(splitSkills.personal);
+      }
 
-        if (assignmentsRes.status === "fulfilled") setAssignments(assignmentsRes.value?.items || []);
-        if (attendanceRes.status === "fulfilled") setAttendance(attendanceRes.value?.items || []);
-        if (progressRes.status === "fulfilled") setProgress(progressRes.value?.items || []);
-        if (resourcesRes.status === "fulfilled") setResources(resourcesRes.value?.items || []);
+      if (coursesRes.status === "fulfilled") {
+        const allocated = coursesRes.value?.allocatedCourses || [];
+        const registered = coursesRes.value?.registeredCourses || [];
+        const combinedCourses = coursesRes.value?.items || [...allocated, ...registered];
+        setCourses(combinedCourses);
+        setAllocatedCourses(allocated.length ? allocated : combinedCourses.filter((course) => String(course.source || "admin").toLowerCase() !== "student" && String(course.status || "").toLowerCase() !== "registered"));
+        setRegisteredCourses(registered.length ? registered : combinedCourses.filter((course) => String(course.source || "").toLowerCase() === "student" || String(course.status || "").toLowerCase() === "registered"));
+      }
 
-        const firstError = [studentRes, skillsRes, coursesRes, assignmentsRes, attendanceRes, progressRes, resourcesRes]
-          .find((result) => result.status === "rejected");
+      if (assignmentsRes.status === "fulfilled") setAssignments(assignmentsRes.value?.items || []);
+      if (attendanceRes.status === "fulfilled") setAttendance(attendanceRes.value?.items || []);
+      if (progressRes.status === "fulfilled") setProgress(progressRes.value?.items || []);
+      if (resourcesRes.status === "fulfilled") setResources(resourcesRes.value?.items || []);
 
-        if (firstError?.status === "rejected") {
-          setStatus(firstError.reason?.message || "Some student data could not be loaded");
-        } else {
-          setStatus("");
-        }
-      } catch (err) {
-        setStatus(err.message || "Failed to load student data");
-      } finally {
+      const firstError = [studentRes, skillsRes, coursesRes, assignmentsRes, attendanceRes, progressRes, resourcesRes]
+        .find((result) => result.status === "rejected");
+
+      if (firstError?.status === "rejected") {
+        setStatus(firstError.reason?.message || "Some student data could not be loaded");
+      } else {
+        setStatus("");
+      }
+    } catch (err) {
+      setStatus(err.message || "Failed to load student data");
+    } finally {
+      if (showLoader) {
         setIsLoading(false);
       }
-    };
+    }
+  }, [navigate, loggedInEmail, loggedInName, applyDashboardPayload, clearStudentDashboardCache]);
 
-    loadStudentData();
-  }, [navigate, loggedInEmail, loggedInName, applyDashboardPayload]);
+  const refreshStudentWorkflow = useCallback(async () => {
+    await loadStudentData({ allowCache: false, showLoader: false });
+  }, [loadStudentData]);
+
+  // Fetch student data on mount
+  useEffect(() => {
+    loadStudentData({ allowCache: true, showLoader: true });
+  }, [loadStudentData]);
 
   const analytics = useMemo(() => {
     const allCourses = [...allocatedCourses, ...registeredCourses];
@@ -364,7 +360,7 @@ export default function StudentDashboard() {
     const pendingAssignments = assignments.filter((a) => a.status !== "completed").length;
 
     return [
-      { label: "Allocated Skills", value: allocatedSkills.length, icon: FiTarget, tone: "text-indigo-600 bg-indigo-50" },
+      { label: "Allocated Courses", value: allocatedSkills.length, icon: FiTarget, tone: "text-indigo-600 bg-indigo-50" },
       { label: "Completed Courses", value: completedCourses, icon: FiCheck, tone: "text-emerald-600 bg-emerald-50" },
       { label: "Pending Courses", value: pendingCourses, icon: FiTarget, tone: "text-amber-600 bg-amber-50" },
       { label: "Attendance %", value: attendancePct, suffix: "%", icon: FiActivity, tone: "text-sky-600 bg-sky-50" },
@@ -464,8 +460,8 @@ export default function StudentDashboard() {
   const addSkill = async () => {
     if (actionLoading) return;
     if (!skillForm.title.trim()) {
-      setStatus("Skill title is required");
-      toast.error("Skill title is required", { containerId: "global-toasts" });
+      setStatus("Course title is required");
+      toast.error("Course title is required", { containerId: "global-toasts" });
       return;
     }
 
@@ -478,6 +474,7 @@ export default function StudentDashboard() {
     }
 
     setActionLoading("saveSkill");
+    setStatus("");
     try {
       const headers = {
         "Content-Type": "application/json",
@@ -494,16 +491,11 @@ export default function StudentDashboard() {
         body: JSON.stringify({ ...skillForm, addedBy: "student" }),
       });
 
-      setStatus(editingSkillId ? "Skill updated" : "Skill added");
-      toast.success(editingSkillId ? "Skill updated successfully" : "Skill added successfully", { containerId: "global-toasts" });
+      await refreshStudentWorkflow();
+      setStatus(editingSkillId ? "Course updated" : "Course added");
+      toast.success(editingSkillId ? "Course updated successfully" : "Course added successfully", { containerId: "global-toasts" });
       setSkillForm(emptySkill);
       setEditingSkillId("");
-
-      // Reload skills
-      const skillsRes = await requestWithFallback("/api/student/skills", { headers });
-      const splitSkills = splitSkillsByOwner(skillsRes.items || []);
-      setAllocatedSkills(splitSkills.allocated);
-      setMySkills(splitSkills.personal);
     } catch (err) {
       const message = err.message || "Failed to save skill";
       setStatus(message);
@@ -529,6 +521,7 @@ export default function StudentDashboard() {
     }
 
     setActionLoading(`deleteSkill:${skillId}`);
+    setStatus("");
     try {
       const headers = {
         "Content-Type": "application/json",
@@ -538,9 +531,9 @@ export default function StudentDashboard() {
 
       await requestWithFallback(`/api/student/skills/${skillId}`, { method: "DELETE", headers });
 
-      setStatus("Skill deleted");
-      toast.success("Skill deleted successfully", { containerId: "global-toasts" });
-      setMySkills((prev) => prev.filter((s) => s.id !== skillId));
+      await refreshStudentWorkflow();
+      setStatus("Course deleted");
+      toast.success("Course deleted successfully", { containerId: "global-toasts" });
     } catch (err) {
       const message = err.message || "Failed to delete skill";
       setStatus(message);
@@ -567,6 +560,7 @@ export default function StudentDashboard() {
     }
 
     setActionLoading(`submitAssessment:${assignmentId}`);
+    setStatus("");
     try {
       const headers = {
         "Content-Type": "application/json",
@@ -574,7 +568,7 @@ export default function StudentDashboard() {
         "x-student-session": JSON.stringify({ uid: user.uid, email: user.email || "", role: "student" }),
       };
 
-      const payload = await requestWithFallback(`/api/student/assessments/${assignmentId}/attempt`, {
+      await requestWithFallback(`/api/student/assessments/${assignmentId}/attempt`, {
         method: "POST",
         headers,
         body: JSON.stringify({
@@ -585,9 +579,9 @@ export default function StudentDashboard() {
         }),
       });
 
+      await refreshStudentWorkflow();
       setStatus("Assessment submitted and evaluated");
       toast.success("Assessment submitted successfully", { containerId: "global-toasts" });
-      setAssignments((prev) => prev.map((a) => (a.id === assignmentId ? { ...a, status: "completed", score: payload?.item?.marks ?? a.score, attemptedAt: payload?.item?.submittedAt || new Date().toISOString() } : a)));
     } catch (err) {
       const message = err.message || "Failed to submit assessment";
       setStatus(message);
@@ -631,6 +625,7 @@ export default function StudentDashboard() {
       }));
 
       setCommunicationSkills(groups);
+      setStatus("");
     } catch (err) {
       setStatus(err.message || "Failed to load communication tasks");
     } finally {
@@ -654,6 +649,7 @@ export default function StudentDashboard() {
     }
 
     setActionLoading(`communication:${taskId}`);
+    setStatus("");
     try {
       const headers = {
         "Content-Type": "application/json",
@@ -674,7 +670,8 @@ export default function StudentDashboard() {
 
       toast.success("Response submitted", { containerId: "global-toasts" });
       setCommunicationDrafts((prev) => ({ ...prev, [key]: { response: "", responseUrl: "" } }));
-      await loadCommunicationPractice();
+      await Promise.all([loadCommunicationPractice(), refreshStudentWorkflow()]);
+      setStatus("Response submitted");
     } catch (err) {
       const message = err.message || "Failed to submit response";
       setStatus(message);
@@ -717,7 +714,7 @@ export default function StudentDashboard() {
         <DashboardCard title="Learning" subtitle="Overview" icon={FiTrendingUp} accent="indigo">
           <div className="space-y-3 text-sm text-slate-700">
             <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
-              <div className="font-semibold">Allocated Skills: {allocatedSkills.length}</div>
+              <div className="font-semibold">Allocated Courses: {allocatedSkills.length}</div>
             </div>
             <div className="rounded-xl bg-slate-50 border border-slate-100 p-3">
               <div className="font-semibold">Active Courses: {courses.length}</div>
@@ -732,7 +729,7 @@ export default function StudentDashboard() {
         <DashboardCard title="Quick Actions" subtitle="Actions" icon={FiPlus} accent="purple">
           <div className="grid grid-cols-2 gap-3">
             {[
-              ["My Skills", "skills"],
+              ["My Courses", "skills"],
               ["My Courses", "courses"],
               ["Assessments", "assignments"],
               ["Communication", "communication"],
@@ -754,16 +751,16 @@ export default function StudentDashboard() {
     </div>
   );
 
-  // Section: My Skills
+  // Section: My Courses
   const skillsSection = (
     <div className="space-y-6">
       <div className="rounded-2xl bg-white shadow-md border border-slate-100 overflow-hidden">
         <div className="section-head section-head-indigo">
-          <h3 className="text-lg">Allocated Skills</h3>
+          <h3 className="text-lg">Allocated Courses</h3>
         </div>
         <div className="p-6">
           {allocatedSkills.length === 0 ? (
-            <div className="text-center py-8 text-slate-500">No allocated skills yet</div>
+            <div className="text-center py-8 text-slate-500">No allocated courses yet</div>
           ) : (
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               {allocatedSkills.map((skill) => (
@@ -784,11 +781,11 @@ export default function StudentDashboard() {
 
       <div className="rounded-2xl bg-white shadow-md border border-slate-100 overflow-hidden">
         <div className="section-head section-head-emerald">
-          <h3 className="text-lg">My Skills</h3>
+          <h3 className="text-lg">My Courses</h3>
         </div>
         <div className="p-6">
           {mySkills.length === 0 ? (
-            <div className="text-center py-8 text-slate-500">No skills added yet.</div>
+            <div className="text-center py-8 text-slate-500">No courses added yet.</div>
           ) : (
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
               {mySkills.map((skill) => (
@@ -825,21 +822,21 @@ export default function StudentDashboard() {
     </div>
   );
 
-  // Section: Add Skill
+  // Section: Add Course
   const addSkillSection = (
     <div className="rounded-2xl bg-white shadow-md border border-slate-100 p-6">
       <div className="mb-6">
-        <h3 className="text-lg font-bold text-slate-900">Add Skill</h3>
+        <h3 className="text-lg font-bold text-slate-900">Add Course</h3>
       </div>
 
       <div className="space-y-4 max-w-2xl">
         <div>
-          <label className="block text-sm font-semibold text-slate-700 mb-2">Skill Title</label>
+          <label className="block text-sm font-semibold text-slate-700 mb-2">Course Title</label>
           <input
             type="text"
             value={skillForm.title}
             onChange={(e) => setSkillForm({ ...skillForm, title: e.target.value })}
-            placeholder="Skill name"
+            placeholder="Course name"
             className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none transition-all duration-200"
           />
         </div>
@@ -1328,7 +1325,7 @@ export default function StudentDashboard() {
             </nav>
             <div className="mt-5 pt-4 border-t border-slate-200 space-y-2">
               <button
-                onClick={() => window.location.reload()}
+                onClick={() => loadStudentData({ allowCache: false, showLoader: true })}
                 className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-slate-200 text-slate-800 font-semibold hover:bg-slate-300 transition-all duration-200"
               >
                 <FiRefreshCw /> Refresh

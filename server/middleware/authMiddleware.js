@@ -34,21 +34,46 @@ const seedLocalStudentProfile = (uid, email = "") => {
     }
 
     if (!db.users[uid]) {
-      db.users[uid] = {
-        profile: {
-          id: uid,
-          name: "",
-          email,
-          role: "student",
-          enabled: true,
-        },
-        skills: [],
-        courses: [],
-        assignments: [],
-        attendance: [],
-        progress: [],
-        resources: [],
-      };
+      const normalizedEmail = String(email || "").trim().toLowerCase();
+      const existingKey = normalizedEmail
+        ? Object.keys(db.users).find((key) => {
+            const row = db.users[key] || {};
+            const rowEmail = String(row?.profile?.email || "").trim().toLowerCase();
+            return Boolean(rowEmail) && rowEmail === normalizedEmail;
+          })
+        : "";
+
+      if (existingKey) {
+        db.users[uid] = {
+          ...(db.users[existingKey] || {}),
+          profile: {
+            ...(db.users[existingKey]?.profile || {}),
+            id: uid,
+            email: db.users[existingKey]?.profile?.email || email,
+            role: "student",
+            enabled: db.users[existingKey]?.profile?.enabled !== false,
+          },
+        };
+        if (existingKey !== uid) {
+          delete db.users[existingKey];
+        }
+      } else {
+        db.users[uid] = {
+          profile: {
+            id: uid,
+            name: "",
+            email,
+            role: "student",
+            enabled: true,
+          },
+          skills: [],
+          courses: [],
+          assignments: [],
+          attendance: [],
+          progress: [],
+          resources: [],
+        };
+      }
     } else {
       const prev = db.users[uid].profile || {};
       db.users[uid].profile = {
@@ -59,6 +84,13 @@ const seedLocalStudentProfile = (uid, email = "") => {
         email: prev.email || email,
       };
     }
+
+    if (!Array.isArray(db.users[uid].skills)) db.users[uid].skills = [];
+    if (!Array.isArray(db.users[uid].courses)) db.users[uid].courses = [];
+    if (!Array.isArray(db.users[uid].assignments)) db.users[uid].assignments = [];
+    if (!Array.isArray(db.users[uid].attendance)) db.users[uid].attendance = [];
+    if (!Array.isArray(db.users[uid].progress)) db.users[uid].progress = [];
+    if (!Array.isArray(db.users[uid].resources)) db.users[uid].resources = [];
 
     fs.writeFileSync(LOCAL_STUDENT_DB_PATH, JSON.stringify(db, null, 2));
   } catch (err) {

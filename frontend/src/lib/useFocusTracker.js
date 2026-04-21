@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { recordFocusSession, ALLOWED_SITES, PLATFORM_URLS, formatDateKey } from "./focusService";
+import { openLiveTimerPinWindow } from "./liveTimerPin";
 
 const nowIso = () => new Date().toISOString();
 const isAllowedDomain = (domain, allowedSites) => {
@@ -13,6 +14,43 @@ const getWindowDomain = (winRef) => {
   } catch (err) {
     return "";
   }
+};
+
+const openFocusWindow = (url) => {
+  const targetUrl = String(url || "").trim();
+  if (!targetUrl) return null;
+
+  const screenWidth = Math.max(1024, Number(window.screen?.availWidth || window.innerWidth || 1280));
+  const screenHeight = Math.max(700, Number(window.screen?.availHeight || window.innerHeight || 800));
+  const features = [
+    "popup=yes",
+    "noopener",
+    "noreferrer",
+    `width=${screenWidth}`,
+    `height=${screenHeight}`,
+    "left=0",
+    "top=0",
+  ].join(",");
+
+  let popup = null;
+  try {
+    popup = window.open(targetUrl, "_blank", features);
+  } catch {
+    popup = null;
+  }
+
+  if (popup) {
+    try {
+      popup.focus();
+      popup.moveTo?.(0, 0);
+      popup.resizeTo?.(screenWidth, screenHeight);
+    } catch {
+      // Ignore browser restrictions for popup move/resize.
+    }
+    return popup;
+  }
+
+  return window.open(targetUrl, "_blank", "noopener,noreferrer");
 };
 
 export function useFocusTracker(userId, config = {}) {
@@ -161,8 +199,8 @@ export function useFocusTracker(userId, config = {}) {
       pauseStartRef.current = null;
     }
 
-    if (windowDomain && windowDomain !== activeDomain) {
-      setActiveDomain(windowDomain);
+    if (windowDomain) {
+      setActiveDomain((prev) => (prev === windowDomain ? prev : windowDomain));
     }
 
     if (startTimeRef.current === null) startTimeRef.current = now;
@@ -201,8 +239,8 @@ export function useFocusTracker(userId, config = {}) {
 
   useEffect(() => {
     const domainTarget = perSiteTargets[selectedDomain];
-    if (domainTarget && domainTarget !== targetMinutes) {
-      setTargetMinutes(domainTarget);
+    if (domainTarget) {
+      setTargetMinutes((prev) => (prev === domainTarget ? prev : domainTarget));
     }
   }, [perSiteTargets, selectedDomain]);
 
@@ -268,8 +306,9 @@ export function useFocusTracker(userId, config = {}) {
     logEvent("start", domain);
     lastActivityRef.current = now;
     startInterval();
+    openLiveTimerPinWindow();
     if (url) {
-      windowRef.current = window.open(url, "_blank", "noopener,noreferrer");
+      windowRef.current = openFocusWindow(url);
     }
   }, [allowedDomain, resetAll, startInterval, perSiteTargets, logEvent, targetMinutes, platformUrls, storageKeys.paused, storageKeys.start]);
 
@@ -282,8 +321,9 @@ export function useFocusTracker(userId, config = {}) {
       if (statusRef.current === "running" || statusRef.current === "paused") {
         setActiveDomain(domain);
         setPlatformName(domain);
+        openLiveTimerPinWindow();
         if (url) {
-          windowRef.current = window.open(url, "_blank", "noopener,noreferrer");
+          windowRef.current = openFocusWindow(url);
         }
         logEvent("switch", domain);
         lastActivityRef.current = Date.now();
@@ -310,8 +350,9 @@ export function useFocusTracker(userId, config = {}) {
       logEvent("start", domain);
       lastActivityRef.current = now;
       startInterval();
+      openLiveTimerPinWindow();
       if (url) {
-        windowRef.current = window.open(url, "_blank", "noopener,noreferrer");
+        windowRef.current = openFocusWindow(url);
       }
     },
     [resetAll, startInterval, perSiteTargets, logEvent, targetMinutes, platformUrls, storageKeys.paused, storageKeys.start]
@@ -326,7 +367,7 @@ export function useFocusTracker(userId, config = {}) {
     pauseStartRef.current = Date.now();
     sessionStorage.setItem(storageKeys.paused, String(pausedTimeRef.current));
     logEvent("pause", "manual");
-  }, [status, clearTimer, logEvent]);
+  }, [status, clearTimer, logEvent, storageKeys.paused]);
 
   const resume = useCallback(() => {
     if (status !== "paused") return;
@@ -344,7 +385,7 @@ export function useFocusTracker(userId, config = {}) {
     lastActivityRef.current = now;
     logEvent("resume", "focus");
     startInterval();
-  }, [status, startInterval, logEvent]);
+  }, [status, startInterval, logEvent, storageKeys.paused]);
 
   const classifyCompletion = useCallback((activeMs) => {
     const target = targetMsRef.current || activeMs || 1;

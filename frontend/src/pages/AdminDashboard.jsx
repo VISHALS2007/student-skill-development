@@ -82,13 +82,16 @@ const dedupeRepeatedMessage = (value = "") => {
 const normalizeTopPanelStatus = (value = "") => {
   const message = dedupeRepeatedMessage(value);
   if (!message) return "";
-  if (/cannot connect to admin server/i.test(message)) {
+  if (/(cannot connect to admin server|cannot reach admin api|failed to fetch|network|request timeout|backend server is offline|timeout)/i.test(message)) {
     return "Backend server is offline. Please start the server.";
   }
   return message;
 };
 
-const isOfflineStatusMessage = (value = "") => /backend server is offline/i.test(String(value || ""));
+const isOfflineStatusMessage = (value = "") =>
+  /(backend server is offline|cannot connect to admin server|cannot reach admin api|failed to fetch|request timeout|network|timeout)/i.test(
+    String(value || "")
+  );
 const OFFLINE_RETRY_INTERVAL_MS = 5000;
 
 const dedupeUsersForView = (items = []) => {

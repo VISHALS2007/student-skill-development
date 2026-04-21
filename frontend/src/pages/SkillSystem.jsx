@@ -32,6 +32,24 @@ const requestWithFallback = (path, options = {}, timeoutMs = 8000) =>
 const SKILL_SYSTEM_CACHE_KEY = "skill-system:cache:v1";
 const SKILL_SYSTEM_CACHE_TTL_MS = 60000;
 
+const normalizeExternalUrl = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  const withLeadingProtocol = raw.startsWith("//") ? `https:${raw}` : raw;
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(withLeadingProtocol)
+    ? withLeadingProtocol
+    : `https://${withLeadingProtocol}`;
+
+  try {
+    const parsed = new URL(withProtocol);
+    if (!/^https?:$/i.test(parsed.protocol)) return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+};
+
 const getQuickToken = async (user, timeoutMs = 700) => {
   if (!user || typeof user.getIdToken !== "function") return "";
   try {
@@ -77,7 +95,7 @@ const writeSkillSystemCache = (uid = "", payload = {}) => {
 };
 
 const openPracticeWindow = (url) => {
-  const targetUrl = String(url || "").trim();
+  const targetUrl = normalizeExternalUrl(url);
   if (!targetUrl) return null;
 
   const screenWidth = Math.max(1024, Number(window.screen?.availWidth || window.innerWidth || 1280));
@@ -152,14 +170,14 @@ const SkillSystem = () => {
 
   const normalizeWebsiteEntry = (site = "") => {
     if (typeof site === "string") {
-      const url = site.trim();
+      const url = normalizeExternalUrl(site);
       return {
         title: url.replace(/^https?:\/\//i, "").replace(/\/$/, ""),
         url,
       };
     }
 
-    const url = String(site?.url || "").trim();
+    const url = normalizeExternalUrl(site?.url || "");
     const fallbackTitle = url.replace(/^https?:\/\//i, "").replace(/\/$/, "");
     const title = String(site?.title || site?.label || site?.type || fallbackTitle || "").trim();
 
@@ -590,15 +608,22 @@ const SkillSystem = () => {
     if (!user || !selectedSkillId || !activityForm.name || !activityForm.duration) return;
     setSaving(true);
     const skill = skills.find((s) => s.id === selectedSkillId);
+    const normalizedPlatformUrl = normalizeExternalUrl(activityForm.platformUrl || activityForm.platform);
     try {
       if (editingActivityId) {
         await updateDoc(doc(db, "users", user.uid, "activities", editingActivityId), {
           activityName: activityForm.name,
           defaultDuration: Number(activityForm.duration),
           platform: activityForm.platform,
-          platformUrl: activityForm.platformUrl,
+          platformUrl: normalizedPlatformUrl,
         });
-        setActivities((prev) => prev.map((a) => (a.id === editingActivityId ? { ...a, ...activityForm, defaultDuration: Number(activityForm.duration) } : a)));
+        setActivities((prev) =>
+          prev.map((a) =>
+            a.id === editingActivityId
+              ? { ...a, ...activityForm, platformUrl: normalizedPlatformUrl, defaultDuration: Number(activityForm.duration) }
+              : a
+          )
+        );
         notify("success", "Activity updated");
       } else {
         const ref = await addDoc(collection(db, "users", user.uid, "activities"), {
@@ -608,7 +633,7 @@ const SkillSystem = () => {
           activityName: activityForm.name,
           defaultDuration: Number(activityForm.duration),
           platform: activityForm.platform,
-          platformUrl: activityForm.platformUrl,
+          platformUrl: normalizedPlatformUrl,
           createdAt: serverTimestamp(),
         });
         setActivities((prev) => [
@@ -620,7 +645,7 @@ const SkillSystem = () => {
             activityName: activityForm.name,
             defaultDuration: Number(activityForm.duration),
             platform: activityForm.platform,
-            platformUrl: activityForm.platformUrl,
+            platformUrl: normalizedPlatformUrl,
           },
           ...prev,
         ]);
@@ -728,10 +753,13 @@ const SkillSystem = () => {
         durationMinutes,
         category: "Communication",
         autoStart: true,
+        resumeSession: false,
+        sessionInstanceId: String(Date.now()),
         skillsSnapshot: (skills || [])
           .map((item) => ({ id: item?.id, skillName: String(item?.skillName || item?.title || item?.name || "").trim() }))
           .filter((item) => item.skillName),
       };
+      sessionStorage.removeItem("commSessionState:v1");
       sessionStorage.setItem("commSessionInfo", JSON.stringify(payload));
       navigate("/communication-session", { state: payload });
       return;
@@ -746,7 +774,7 @@ const SkillSystem = () => {
       durationMs,
       startedAt,
       durationMinutes,
-      platformUrl: activity.platformUrl || activity.platform || "",
+      platformUrl: normalizeExternalUrl(activity.platformUrl || activity.platform || ""),
     };
     openLiveTimerPinWindow();
     if (timerState.platformUrl) {

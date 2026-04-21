@@ -4,7 +4,6 @@ import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { useAuth } from "../lib/AuthContext";
 import { db } from "../firebase";
 import { updateAttendanceRecord } from "../services/attendanceService";
-import { clearLiveTimerPin, openLiveTimerPinWindow, updateLiveTimerPin } from "../lib/liveTimerPin";
 import "../styles/CommunicationSession.css";
 
 const TOPICS = [
@@ -54,9 +53,8 @@ const CommunicationSession = () => {
   const streamRef = useRef(null);
   const intervalRef = useRef(null);
   const finishedRef = useRef(false);
-  const runStartedAtRef = useRef(null);
-  const runRemainingAtStartRef = useRef(null);
-  const pinOpenedRef = useRef(false);
+  const runEndAtRef = useRef(null);
+  const remainingTimeRef = useRef(0);
 
   const sessionInfo = useMemo(() => {
     const stored = sessionStorage.getItem("commSessionInfo");
@@ -72,9 +70,11 @@ const CommunicationSession = () => {
   }, [state]);
 
   const durationMinutes = Number(sessionInfo?.durationMinutes) || 5;
+  const resumeSession = Boolean(sessionInfo?.resumeSession);
+  const sessionInstanceId = String(sessionInfo?.sessionInstanceId || "").trim();
   const sessionKey = useMemo(
-    () => `${String(sessionInfo?.taskName || "Communication Practice")}::${durationMinutes}`,
-    [durationMinutes, sessionInfo?.taskName]
+    () => `${String(sessionInfo?.taskName || "Communication Practice")}::${durationMinutes}::${sessionInstanceId || "default"}`,
+    [durationMinutes, sessionInfo?.taskName, sessionInstanceId]
   );
 
   const [remainingTime, setRemainingTime] = useState(durationMinutes * 60);
@@ -84,8 +84,11 @@ const CommunicationSession = () => {
   const [hydrated, setHydrated] = useState(false);
   const [isFinished, setIsFinished] = useState(false);
   const [error, setError] = useState("");
-  const [pinBlocked, setPinBlocked] = useState(false);
   const shouldRunTimer = hydrated && isFullscreen && !isManualPaused && !isFinished;
+
+  useEffect(() => {
+    remainingTimeRef.current = Math.max(0, Number(remainingTime) || 0);
+  }, [remainingTime]);
 
   const formatTime = (totalSeconds) => {
     const m = Math.floor(totalSeconds / 60);
@@ -166,6 +169,26 @@ const CommunicationSession = () => {
     }
   }, [durationMinutes, sessionInfo?.activityName, sessionInfo?.skillName, sessionInfo?.skillsSnapshot, sessionInfo?.taskName, user]);
 
+  const saveSessionSummary = useCallback((status = "completed") => {
+    const today = new Date().toISOString().split("T")[0];
+    try {
+      sessionStorage.setItem(
+        COMM_SESSION_COMPLETED_KEY,
+        JSON.stringify({
+          skillName: String(sessionInfo?.skillName || sessionInfo?.taskName || "Communication Practice").trim(),
+          taskName: String(sessionInfo?.taskName || sessionInfo?.skillName || "Communication Practice").trim(),
+          durationMinutes,
+          remainingTime: Math.max(0, Math.round(remainingTimeRef.current || remainingTime || 0)),
+          status,
+          date: today,
+          at: Date.now(),
+        })
+      );
+    } catch {
+      // Ignore session storage errors.
+    }
+  }, [durationMinutes, remainingTime, sessionInfo?.skillName, sessionInfo?.taskName]);
+
   const completeSession = useCallback(async () => {
     if (finishedRef.current) return;
     finishedRef.current = true;
@@ -173,7 +196,7 @@ const CommunicationSession = () => {
     stopCamera();
     sessionStorage.removeItem("commSessionInfo");
     sessionStorage.removeItem(SESSION_STATE_KEY);
-    clearLiveTimerPin();
+    sessionStorage.removeItem("commSessionState:v1");
     clearInterval(intervalRef.current);
     await exitFullscreen();
     await saveCompletion();
@@ -183,7 +206,6 @@ const CommunicationSession = () => {
   const startCamera = useCallback(async () => {
     if (!navigator?.mediaDevices) {
       setError("Camera is not supported on this device.");
-      navigate("/dashboard", { replace: true });
       return;
     }
     try {
@@ -197,19 +219,30 @@ const CommunicationSession = () => {
     } catch (err) {
       console.error("Unable to start camera", err);
       setError("Unable to access camera. Please check permissions.");
-      navigate("/dashboard", { replace: true });
     }
-  }, [navigate]);
+  }, []);
 
   useEffect(() => {
     setHydrated(false);
     setIsFinished(false);
     finishedRef.current = false;
-    const raw = sessionStorage.getItem(SESSION_STATE_KEY);
-    if (!raw) {
+    const fallbackRemaining = Math.max(0, Number(sessionInfo?.remainingTime || durationMinutes * 60) || durationMinutes * 60);
+    const sessionResumeRemaining = Math.max(0, Number(sessionInfo?.remainingTime || fallbackRemaining) || fallbackRemaining);
+
+    if (!resumeSession) {
+      sessionStorage.removeItem(SESSION_STATE_KEY);
       setRemainingTime(durationMinutes * 60);
       setTopic(getRandomTopic());
       setIsManualPaused(false);
+      setHydrated(true);
+      return;
+    }
+
+    const raw = sessionStorage.getItem(SESSION_STATE_KEY);
+    if (!raw) {
+      setRemainingTime(sessionResumeRemaining);
+      setTopic(getRandomTopic());
+      setIsManualPaused(Boolean(sessionInfo?.isManualPaused));
       setHydrated(true);
       return;
     }
@@ -228,19 +261,32 @@ const CommunicationSession = () => {
       // Ignore invalid state and continue with defaults.
     }
 
-    setRemainingTime(durationMinutes * 60);
+    setRemainingTime(fallbackRemaining);
     setTopic(getRandomTopic());
-    setIsManualPaused(false);
+    setIsManualPaused(Boolean(sessionInfo?.isManualPaused));
     setHydrated(true);
-  }, [durationMinutes, sessionKey]);
+  }, [durationMinutes, resumeSession, sessionInfo?.isManualPaused, sessionInfo?.remainingTime, sessionKey]);
 
   useEffect(() => {
-    if (!hydrated) return;
-    sessionStorage.setItem("commSessionInfo", JSON.stringify(sessionInfo));
+    if (!hydrated || isFinished || finishedRef.current) return;
+    const sessionStatus = shouldRunTimer ? "running" : isManualPaused ? "paused" : "idle";
+    sessionStorage.setItem(
+      "commSessionInfo",
+      JSON.stringify({
+        ...sessionInfo,
+        remainingTime,
+        isManualPaused,
+        status: sessionStatus,
+        resumeSession: true,
+        sessionInstanceId,
+      })
+    );
     sessionStorage.setItem(
       SESSION_STATE_KEY,
       JSON.stringify({
         sessionKey,
+        sessionInstanceId,
+        resumeSession: true,
         taskName: sessionInfo?.taskName || "Communication Practice",
         skillName: sessionInfo?.skillName || sessionInfo?.taskName || "Communication Practice",
         activityName: sessionInfo?.activityName || sessionInfo?.taskName || "Communication Practice",
@@ -248,10 +294,11 @@ const CommunicationSession = () => {
         remainingTime,
         topic,
         isManualPaused,
+        status: sessionStatus,
         updatedAt: Date.now(),
       })
     );
-  }, [hydrated, isManualPaused, remainingTime, sessionInfo, sessionKey, topic, durationMinutes]);
+  }, [hydrated, isFinished, isManualPaused, remainingTime, sessionInfo, sessionKey, sessionInstanceId, shouldRunTimer, topic, durationMinutes]);
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -271,36 +318,13 @@ const CommunicationSession = () => {
     return () => {
       clearInterval(intervalRef.current);
       stopCamera();
-      clearLiveTimerPin();
     };
   }, [requestFullscreen, startCamera, stopCamera]);
 
-  useEffect(() => {
-    const status = shouldRunTimer ? "running" : remainingTime <= 0 ? "completed" : "paused";
-    const totalMs = Math.max(1, Number(durationMinutes) || 1) * 60 * 1000;
-    const elapsedMs = Math.max(0, totalMs - remainingTime * 1000);
-    updateLiveTimerPin({
-      label: sessionInfo?.taskName || "Communication Practice",
-      status,
-      remainingMs: Math.max(0, remainingTime * 1000),
-      elapsedMs,
-    });
-  }, [durationMinutes, remainingTime, sessionInfo?.taskName, shouldRunTimer]);
-
-  useEffect(() => {
-    if (!shouldRunTimer || pinOpenedRef.current) return;
-    const popup = openLiveTimerPinWindow();
-    pinOpenedRef.current = true;
-    setPinBlocked(!popup);
-  }, [shouldRunTimer]);
-
   const syncRemainingFromClock = useCallback(() => {
-    const startedAt = Number(runStartedAtRef.current || 0);
-    const baseRemaining = Number(runRemainingAtStartRef.current || 0);
-    if (!startedAt || !Number.isFinite(baseRemaining)) return;
-
-    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-    const nextRemaining = Math.max(0, baseRemaining - elapsedSeconds);
+    const endAt = Number(runEndAtRef.current || 0);
+    if (!endAt) return;
+    const nextRemaining = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
     setRemainingTime((prev) => (prev === nextRemaining ? prev : nextRemaining));
   }, []);
 
@@ -308,22 +332,21 @@ const CommunicationSession = () => {
     clearInterval(intervalRef.current);
     if (!shouldRunTimer) {
       syncRemainingFromClock();
-      runStartedAtRef.current = null;
-      runRemainingAtStartRef.current = null;
+      runEndAtRef.current = null;
       return;
     }
 
-    runStartedAtRef.current = Date.now();
-    runRemainingAtStartRef.current = Math.max(0, Number(remainingTime) || 0);
+    const nextEndAt = Date.now() + remainingTimeRef.current * 1000;
+    runEndAtRef.current = nextEndAt;
 
     intervalRef.current = setInterval(() => {
-      const startedAt = Number(runStartedAtRef.current || 0);
-      const baseRemaining = Number(runRemainingAtStartRef.current || 0);
-      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      const nextRemaining = Math.max(0, baseRemaining - elapsedSeconds);
+      const endAt = Number(runEndAtRef.current || 0);
+      if (!endAt) return;
+      const nextRemaining = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
 
       if (nextRemaining <= 0) {
         clearInterval(intervalRef.current);
+        runEndAtRef.current = null;
         setRemainingTime(0);
         completeSession();
         return;
@@ -335,31 +358,32 @@ const CommunicationSession = () => {
     return () => {
       clearInterval(intervalRef.current);
     };
-  }, [completeSession, remainingTime, shouldRunTimer, syncRemainingFromClock]);
+  }, [completeSession, shouldRunTimer, syncRemainingFromClock]);
 
   const handleStop = async () => {
     finishedRef.current = true;
     setIsFinished(true);
     clearInterval(intervalRef.current);
     stopCamera();
+    saveSessionSummary(isManualPaused ? "paused" : "stopped");
     sessionStorage.removeItem("commSessionInfo");
     sessionStorage.removeItem(SESSION_STATE_KEY);
-    clearLiveTimerPin();
+    sessionStorage.removeItem("commSessionState:v1");
     await exitFullscreen();
     navigate("/dashboard", { replace: true });
   };
 
   const handleDashboard = async () => {
+    finishedRef.current = true;
+    setIsFinished(true);
     clearInterval(intervalRef.current);
     stopCamera();
-    clearLiveTimerPin();
+    saveSessionSummary(isManualPaused ? "paused" : "stopped");
+    sessionStorage.removeItem("commSessionInfo");
+    sessionStorage.removeItem(SESSION_STATE_KEY);
+    sessionStorage.removeItem("commSessionState:v1");
     await exitFullscreen();
     navigate("/dashboard", { replace: true });
-  };
-
-  const handlePinTimer = () => {
-    const popup = openLiveTimerPinWindow();
-    setPinBlocked(!popup);
   };
 
   const togglePause = () => {
@@ -403,9 +427,6 @@ const CommunicationSession = () => {
               Enter Full Screen
             </button>
           ) : null}
-          <button className="comm-btn secondary" onClick={handlePinTimer}>
-            Pin Live Timer
-          </button>
           <button className="comm-btn secondary" onClick={handleDashboard}>
             Dashboard
           </button>
@@ -415,7 +436,6 @@ const CommunicationSession = () => {
         </div>
       </div>
 
-      {pinBlocked ? <div className="comm-pin-warning">Popup blocked. Allow popups to use Pin Live Timer.</div> : null}
       {error ? <div className="comm-error">{error}</div> : null}
     </div>
   );

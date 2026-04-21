@@ -1,19 +1,6 @@
 const LIVE_TIMER_PIN_KEY = "liveTimerPinState:v1";
 const LIVE_TIMER_PIN_WINDOW_NAME = "skill-live-timer-pin";
 
-const formatDuration = (ms) => {
-  const totalSeconds = Math.max(0, Math.floor(Number(ms || 0) / 1000));
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-
-  if (hours > 0) {
-    return `${hours.toString().padStart(2, "0")}:${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-  }
-
-  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
-};
-
 const getPinWindowHtml = () => `<!doctype html>
 <html>
 <head>
@@ -174,9 +161,14 @@ export const openLiveTimerPinWindow = () => {
   const height = 190;
   const left = Math.max(0, Number(window.screen?.availWidth || 1280) - width - 16);
   const top = 16;
-  const features = `popup=yes,noopener,noreferrer,width=${width},height=${height},left=${left},top=${top}`;
+  const features = `popup=yes,width=${width},height=${height},left=${left},top=${top}`;
 
-  const popup = window.open("", LIVE_TIMER_PIN_WINDOW_NAME, features);
+  let popup = null;
+  try {
+    popup = window.open("", LIVE_TIMER_PIN_WINDOW_NAME, features);
+  } catch {
+    return null;
+  }
   if (!popup) return null;
 
   try {
@@ -184,11 +176,15 @@ export const openLiveTimerPinWindow = () => {
     popup.document.write(getPinWindowHtml());
     popup.document.close();
     popup.focus();
+    return popup;
   } catch {
-    // Ignore write/focus failures if popup gets blocked mid-flow.
+    try {
+      popup.close();
+    } catch {
+      // Ignore close failures.
+    }
+    return null;
   }
-
-  return popup;
 };
 
 export const updateLiveTimerPin = (state) => {

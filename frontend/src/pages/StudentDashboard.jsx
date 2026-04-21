@@ -52,6 +52,24 @@ const formatDate = (value) => {
   return d.toLocaleDateString(undefined, { day: "2-digit", month: "short", year: "numeric" });
 };
 
+const normalizeExternalUrl = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  const withLeadingProtocol = raw.startsWith("//") ? `https:${raw}` : raw;
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(withLeadingProtocol)
+    ? withLeadingProtocol
+    : `https://${withLeadingProtocol}`;
+
+  try {
+    const parsed = new URL(withProtocol);
+    if (!/^https?:$/i.test(parsed.protocol)) return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+};
+
 const STUDENT_DASHBOARD_CACHE_KEY = "studentDashboardCache:v1";
 const STUDENT_DASHBOARD_CACHE_TTL_MS = 30000;
 const COURSES_PAGE_SIZE = 6;
@@ -950,17 +968,21 @@ export default function StudentDashboard() {
                     <div className="mt-3 pt-3 border-t border-slate-200">
                       <p className="text-xs font-semibold text-slate-700 mb-2">Resources:</p>
                       <div className="space-y-1">
-                        {course.links.map((link, idx) => (
-                          <a
-                            key={idx}
-                            href={link.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs text-indigo-600 hover:text-indigo-700 block truncate"
-                          >
-                            {link.type}: {link.url}
-                          </a>
-                        ))}
+                        {course.links.map((link, idx) => {
+                          const safeUrl = normalizeExternalUrl(link?.url || "");
+                          if (!safeUrl) return null;
+                          return (
+                            <a
+                              key={idx}
+                              href={safeUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-indigo-600 hover:text-indigo-700 block truncate"
+                            >
+                              {link.type}: {safeUrl}
+                            </a>
+                          );
+                        })}
                       </div>
                     </div>
                   )}
@@ -1144,6 +1166,7 @@ export default function StudentDashboard() {
                   const draftKey = `${group.skillId}__${task.id}`;
                   const draft = communicationDrafts[draftKey] || { response: "", responseUrl: "" };
                   const submission = task.submission || null;
+                  const referenceUrl = normalizeExternalUrl(task.referenceLink || "");
                   return (
                     <div key={task.id} className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
                       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1154,8 +1177,8 @@ export default function StudentDashboard() {
                       </div>
                       <p className="text-sm text-slate-700">{task.description}</p>
                       {task.instructions && <p className="text-xs text-slate-500">Instructions: {task.instructions}</p>}
-                      {task.referenceLink && (
-                        <a href={task.referenceLink} target="_blank" rel="noreferrer" className="text-xs text-indigo-600">
+                      {referenceUrl && (
+                        <a href={referenceUrl} target="_blank" rel="noreferrer" className="text-xs text-indigo-600">
                           Reference Link
                         </a>
                       )}
@@ -1260,19 +1283,25 @@ export default function StudentDashboard() {
                 <h4 className="font-bold text-slate-900 mb-4">{courseResources.courseName}</h4>
                 <div className="space-y-3">
                   {courseResources.links.map((link, idx) => (
+                    (() => {
+                      const safeUrl = normalizeExternalUrl(link?.url || "");
+                      if (!safeUrl) return null;
+                      return (
                     <a
                       key={`${courseResources.courseName}-${idx}`}
-                      href={link.url}
+                      href={safeUrl}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="flex items-center gap-3 p-3 rounded-lg bg-white border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50 transition-all duration-200"
                     >
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold text-slate-900 capitalize">{link.type}</p>
-                        <p className="text-xs text-slate-600 truncate">{link.url}</p>
+                        <p className="text-xs text-slate-600 truncate">{safeUrl}</p>
                       </div>
                       <FiLink2 className="text-indigo-600 shrink-0" />
                     </a>
+                      );
+                    })()
                   ))}
                 </div>
               </div>

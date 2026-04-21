@@ -23,8 +23,28 @@ const CATEGORY_TO_DEFAULT_KEY = {
   communication: "communication practice",
 };
 
+const normalizeExternalUrl = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  const withLeadingProtocol = raw.startsWith("//") ? `https:${raw}` : raw;
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(withLeadingProtocol)
+    ? withLeadingProtocol
+    : `https://${withLeadingProtocol}`;
+
+  try {
+    const parsed = new URL(withProtocol);
+    if (!/^https?:$/i.test(parsed.protocol)) return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+};
+
 const getWebsiteTitle = (site = {}, url = "") => {
-  const fallbackUrl = String(url || site?.url || "").trim();
+  const fallbackUrl =
+    String(url || site?.url || site?.link || "").trim() ||
+    normalizeExternalUrl(url || site?.url || site?.link || "");
   const fallbackTitle = fallbackUrl.replace(/^https?:\/\//i, "").replace(/\/$/, "");
   return String(site?.title || site?.label || site?.type || fallbackTitle || "Open").trim();
 };
@@ -32,14 +52,15 @@ const getWebsiteTitle = (site = {}, url = "") => {
 const normalizeSites = (sites = []) =>
   (Array.isArray(sites) ? sites : [])
     .map((site) => {
-      const url = String(site?.url || "").trim();
+      const rawUrl = typeof site === "string" ? site : site?.url || site?.link || "";
+      const url = normalizeExternalUrl(rawUrl);
       return {
         label: getWebsiteTitle(site, url),
         title: getWebsiteTitle(site, url),
         url,
       };
     })
-    .filter((site) => /^https?:\/\//i.test(site.url));
+    .filter((site) => Boolean(site.url));
 
 const getSkillSites = (skillName, skillWebsites = [], skillCategory = "", websiteRef = "") => {
   const explicitSites = normalizeSites(skillWebsites);
@@ -121,7 +142,7 @@ const formatMMSS = (ms) => {
 };
 
 const openPracticeWindow = (url) => {
-  const targetUrl = String(url || "").trim();
+  const targetUrl = normalizeExternalUrl(url);
   if (!targetUrl) return null;
 
   const screenWidth = Math.max(1024, Number(window.screen?.availWidth || window.innerWidth || 1280));
@@ -160,13 +181,32 @@ const openPracticeWindow = (url) => {
 const loadCommunicationSessionState = () => {
   try {
     const raw = sessionStorage.getItem(COMM_SESSION_STATE_KEY);
-    if (!raw) return null;
+    const completionRaw = sessionStorage.getItem(COMM_SESSION_COMPLETED_KEY);
+    if (!raw) {
+      if (!completionRaw) return null;
+      const completion = JSON.parse(completionRaw);
+      const completionDate = String(completion?.date || "").trim();
+      const today = new Date().toISOString().split("T")[0];
+      if (completionDate !== today) return null;
+      const durationMinutes = Math.max(1, Number(completion?.durationMinutes || 5) || 5);
+      const remainingTime = Number.isFinite(Number(completion?.remainingTime)) ? Math.max(0, Math.round(Number(completion.remainingTime))) : 0;
+      const status = String(completion?.status || (remainingTime <= 0 ? "completed" : "stopped")).toLowerCase();
+      return {
+        taskName: completion?.taskName || completion?.skillName || "Communication Practice",
+        skillName: completion?.skillName || completion?.taskName || "Communication Practice",
+        activityName: completion?.taskName || completion?.skillName || "Communication Practice",
+        durationMinutes,
+        remainingTime,
+        status,
+      };
+    }
     const parsed = JSON.parse(raw);
     const remaining = Number(parsed?.remainingTime);
-    if (!Number.isFinite(remaining) || remaining <= 0) return null;
+    if (!Number.isFinite(remaining)) return null;
     return {
       ...parsed,
       remainingTime: Math.max(0, Math.round(remaining)),
+      status: String(parsed?.status || (remaining <= 0 ? "completed" : parsed?.isManualPaused ? "paused" : "running")).toLowerCase(),
     };
   } catch {
     return null;
@@ -237,7 +277,7 @@ const mapAllocatedCourseToSkill = (course = {}, index = 0) => ({
     ? course.links
         .map((link) => ({
           label: String(link?.type || link?.label || "Resource").trim(),
-          url: String(link?.url || "").trim(),
+          url: normalizeExternalUrl(link?.url || ""),
         }))
         .filter((link) => link.url)
     : [],
@@ -332,6 +372,7 @@ const Dashboard = () => {
   const timerRef = useRef(null);
   const runningRef = useRef(null);
   const cacheReadyRef = useRef(false);
+  const lastCommCompletionRef = useRef("");
 
   const refreshCommSessionState = useCallback(() => {
     setCommSessionState(loadCommunicationSessionState());
@@ -493,19 +534,27 @@ const Dashboard = () => {
     if (!completion) return;
     const today = new Date().toISOString().split("T")[0];
     if (String(completion?.date || "") === today) {
+      const completionKey = `${String(completion?.date || "")}::${String(completion?.taskName || completion?.skillName || "") }::${String(completion?.at || "")}`;
+      if (lastCommCompletionRef.current === completionKey) return;
+      lastCommCompletionRef.current = completionKey;
       const key = normalizeName(completion?.skillName || completion?.taskName || "Communication Practice");
       const nextRecord = {
         durationMinutes: Math.max(0, Number(completion?.durationMinutes || 0)),
         completedAtMs: toEpochMs(completion?.at || Date.now()),
       };
-      setCompletedToday((prev) => ({
-        ...prev,
-        ...(key ? { [key]: nextRecord } : {}),
-        __communication: nextRecord,
-      }));
-      setBanner(`Communication session completed: ${completion?.taskName || "Communication Practice"}`);
+      const isCompletionFinished = String(completion?.status || "").toLowerCase() === "completed" || Math.max(0, Number(completion?.remainingTime || 0)) <= 0;
+      if (isCompletionFinished) {
+        setCompletedToday((prev) => ({
+          ...prev,
+          ...(key ? { [key]: nextRecord } : {}),
+          __communication: nextRecord,
+        }));
+        setBanner(`Communication session completed: ${completion?.taskName || "Communication Practice"}`);
+      } else {
+        setCommSessionState(loadCommunicationSessionState());
+        setBanner(`Communication session ${String(completion?.status || "stopped")}: ${completion?.taskName || "Communication Practice"}`);
+      }
     }
-    sessionStorage.removeItem(COMM_SESSION_COMPLETED_KEY);
   }, []);
 
   useEffect(() => {
@@ -513,20 +562,6 @@ const Dashboard = () => {
   }, [skillTimers]);
 
   useEffect(() => {
-    if (commSessionState?.remainingTime > 0) {
-      const durationMinutes = Math.max(1, Number(commSessionState?.durationMinutes || 1));
-      const totalMs = durationMinutes * 60 * 1000;
-      const remainingMs = Math.max(0, Number(commSessionState.remainingTime) * 1000);
-      const elapsedMs = Math.max(0, totalMs - remainingMs);
-      updateLiveTimerPin({
-        label: commSessionState?.taskName || commSessionState?.skillName || "Communication Practice",
-        status: commSessionState?.isManualPaused ? "paused" : "running",
-        remainingMs,
-        elapsedMs,
-      });
-      return;
-    }
-
     const runningEntry = Object.values(skillTimers || {}).find((entry) => entry?.status === "running" && entry?.skillName);
     if (runningEntry) {
       const totalMs = Math.max(0, Number(runningEntry.durationMs) || 0);
@@ -554,7 +589,7 @@ const Dashboard = () => {
     }
 
     clearLiveTimerPin();
-  }, [commSessionState, skillTimers]);
+  }, [skillTimers]);
 
   useEffect(
     () => () => {
@@ -711,6 +746,8 @@ const Dashboard = () => {
     durationMinutes: Math.round(skill?.defaultDuration || 5),
     category: "Communication",
     autoStart: true,
+    resumeSession: false,
+    sessionInstanceId: String(Date.now()),
     skillsSnapshot: (safeSkills || [])
       .map((item) => ({ id: item?.id, skillName: String(item?.skillName || "").trim() }))
       .filter((item) => item.skillName),
@@ -718,13 +755,24 @@ const Dashboard = () => {
 
   const resumeCommunicationSession = () => {
     const sessionInfo = loadCommunicationSessionInfo();
+    const resumedRemainingTime = Number.isFinite(Number(commSessionState?.remainingTime))
+      ? Number(commSessionState.remainingTime)
+      : Number.isFinite(Number(sessionInfo?.remainingTime))
+        ? Number(sessionInfo.remainingTime)
+        : null;
+    const resumedStatus = String(commSessionState?.status || sessionInfo?.status || (commSessionState?.isManualPaused || sessionInfo?.isManualPaused ? "paused" : "running")).toLowerCase();
     const nextPayload = {
       taskName: sessionInfo?.taskName || commSessionState?.taskName || "Communication Practice",
       skillName: sessionInfo?.skillName || commSessionState?.skillName || sessionInfo?.taskName || "Communication Practice",
       activityName: sessionInfo?.activityName || sessionInfo?.taskName || "Communication Practice",
       durationMinutes: Number(sessionInfo?.durationMinutes || commSessionState?.durationMinutes || 5) || 5,
+      ...(resumedRemainingTime === null ? {} : { remainingTime: resumedRemainingTime }),
+      isManualPaused: Boolean(commSessionState?.isManualPaused || sessionInfo?.isManualPaused),
+      status: resumedStatus,
       category: "Communication",
       autoStart: true,
+      resumeSession: true,
+      sessionInstanceId: String(sessionInfo?.sessionInstanceId || commSessionState?.sessionInstanceId || ""),
       skillsSnapshot: Array.isArray(sessionInfo?.skillsSnapshot)
         ? sessionInfo.skillsSnapshot
         : (safeSkills || [])
@@ -738,6 +786,7 @@ const Dashboard = () => {
   const clearCommunicationTimer = () => {
     sessionStorage.removeItem(COMM_SESSION_STATE_KEY);
     sessionStorage.removeItem("commSessionInfo");
+    sessionStorage.removeItem(COMM_SESSION_COMPLETED_KEY);
     setCommSessionState(null);
   };
 
@@ -746,6 +795,8 @@ const Dashboard = () => {
     const isCommunication = skill.skillName?.toLowerCase().includes("communication");
     if (isCommunication) {
       const payload = createCommunicationPayload(skill);
+      sessionStorage.removeItem(COMM_SESSION_STATE_KEY);
+      sessionStorage.removeItem(COMM_SESSION_COMPLETED_KEY);
       sessionStorage.setItem("commSessionInfo", JSON.stringify(payload));
       navigate("/communication-session", { state: payload });
       return;
@@ -779,6 +830,8 @@ const Dashboard = () => {
     const isCommunication = skill.skillName?.toLowerCase().includes("communication");
     if (isCommunication) {
       const payload = createCommunicationPayload(skill);
+      sessionStorage.removeItem(COMM_SESSION_STATE_KEY);
+      sessionStorage.removeItem(COMM_SESSION_COMPLETED_KEY);
       sessionStorage.setItem("commSessionInfo", JSON.stringify(payload));
       navigate("/communication-session", { state: payload });
       return;
@@ -846,10 +899,13 @@ const Dashboard = () => {
                 durationMinutes: durationMs / 60000,
                 updatedAt: skill.updatedAt || skill.createdAt || "",
               });
-              const status = cardCommSession ? "paused" : (timer.status || (doneToday ? "completed" : "idle"));
+              const status = cardCommSession
+                ? String(cardCommSession.status || (cardCommSession.isManualPaused ? "paused" : "running")).toLowerCase()
+                : (timer.status || (doneToday ? "completed" : "idle"));
               const isRunning = status === "running";
-              const isCompleted = status === "completed" || doneToday;
-              const primaryLabel = isCompleted ? "Completed" : isRunning ? "Pause" : timer.status === "paused" ? "Resume" : "Start";
+              const isFinishedSession = cardCommSession && status === "stopped" && remainingMs <= 0;
+              const isCompleted = status === "completed" || isFinishedSession || doneToday;
+              const primaryLabel = isCompleted ? "Completed" : isRunning ? "Pause" : status === "paused" ? "Resume" : status === "stopped" ? "Review" : "Start";
               return (
                 <DashboardCard key={skill.id} title={skill.skillName || "Untitled skill"} subtitle={`Timer: ${Math.round(durationMs / 60000)} min`} accent="indigo">
                   <div className="space-y-3">
@@ -868,7 +924,7 @@ const Dashboard = () => {
                         </span>
                       ) : cardCommSession ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-indigo-700 font-semibold">
-                          <FiAlertCircle className="text-[16px]" /> Paused (fullscreen)
+                          <FiAlertCircle className="text-[16px]" /> {status === "running" ? "Running (fullscreen)" : status === "stopped" && remainingMs <= 0 ? "Completed" : status === "stopped" ? "Stopped" : "Paused (fullscreen)"}
                         </span>
                       ) : status === "running" ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-3 py-1 text-emerald-700 font-semibold">

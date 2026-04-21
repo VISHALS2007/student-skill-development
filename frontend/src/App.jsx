@@ -28,6 +28,29 @@ const FocusAptitude = lazy(() => import("./pages/FocusAptitude"));
 const FocusCommunication = lazy(() => import("./pages/FocusCommunication"));
 const FocusLogical = lazy(() => import("./pages/FocusLogical"));
 
+const ADMIN_SESSION_KEY = "adminSession:v1";
+
+const normalizeAdminRole = (role = "") => {
+  const normalized = String(role || "").trim().toLowerCase();
+  return normalized === "admin" ? "main_admin" : normalized;
+};
+
+const resolveAdminHomeFromSession = () => {
+  try {
+    const raw = localStorage.getItem(ADMIN_SESSION_KEY);
+    if (!raw) return "/main-admin";
+    const parsed = JSON.parse(raw);
+    const role = normalizeAdminRole(parsed?.role || "");
+    return role === "sub_admin" ? "/sub-admin" : "/main-admin";
+  } catch {
+    return "/main-admin";
+  }
+};
+
+function AdminDashboardRedirect() {
+  return <Navigate to={resolveAdminHomeFromSession()} replace />;
+}
+
 function App() {
   const routeFallback = (
     <div className="min-h-screen bg-[#f8fafc] flex items-center justify-center">
@@ -66,7 +89,7 @@ function App() {
             path="/student"
             element={<Navigate to="/dashboard" replace />}
           />
-          <Route path="/admin/dashboard" element={<Navigate to="/main-admin" replace />} />
+          <Route path="/admin/dashboard" element={<AdminDashboardRedirect />} />
           <Route path="/student/dashboard" element={<Navigate to="/dashboard" replace />} />
           <Route
             path="/dashboard"

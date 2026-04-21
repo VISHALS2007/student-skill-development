@@ -111,6 +111,7 @@ const getPinWindowHtml = () => `<!doctype html>
         return String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
       };
 
+
       const root = document.getElementById("root");
 
       const render = () => {
@@ -161,9 +162,14 @@ export const openLiveTimerPinWindow = () => {
   const height = 190;
   const left = Math.max(0, Number(window.screen?.availWidth || 1280) - width - 16);
   const top = 16;
-  const features = `popup=yes,noopener,noreferrer,width=${width},height=${height},left=${left},top=${top}`;
+  const features = `popup=yes,width=${width},height=${height},left=${left},top=${top}`;
 
-  const popup = window.open("", LIVE_TIMER_PIN_WINDOW_NAME, features);
+  let popup = null;
+  try {
+    popup = window.open("", LIVE_TIMER_PIN_WINDOW_NAME, features);
+  } catch {
+    return null;
+  }
   if (!popup) return null;
 
   try {
@@ -171,11 +177,15 @@ export const openLiveTimerPinWindow = () => {
     popup.document.write(getPinWindowHtml());
     popup.document.close();
     popup.focus();
+    return popup;
   } catch {
-    // Ignore write/focus failures if popup gets blocked mid-flow.
+    try {
+      popup.close();
+    } catch {
+      // Ignore close failures.
+    }
+    return null;
   }
-
-  return popup;
 };
 
 export const updateLiveTimerPin = (state) => {

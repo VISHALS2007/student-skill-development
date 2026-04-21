@@ -79,7 +79,7 @@ export default function AdminLogin() {
   useEffect(() => {
     const session = readAdminSession();
     if (isAdminRole(session?.role)) {
-      navigate("/admin/dashboard", { replace: true });
+      navigate(resolveAdminHomeRoute(session?.role), { replace: true });
       return;
     }
 

@@ -53,6 +53,15 @@ const readAdminRoleFromSession = () => {
   }
 };
 
+const resolveAdminHomeFromSession = () => {
+  const role = readAdminRoleFromSession();
+  return role === "sub_admin" ? "/sub-admin" : "/main-admin";
+};
+
+function AdminDashboardRedirect() {
+  return <Navigate to={resolveAdminHomeFromSession()} replace />;
+}
+
 function LandingRedirect() {
   const { user, loading } = useAuth();
   const [target, setTarget] = useState("");
@@ -166,7 +175,7 @@ function App() {
               </ProtectedRoute>
             }
           />
-          <Route path="/admin/dashboard" element={<Navigate to="/main-admin" replace />} />
+          <Route path="/admin/dashboard" element={<AdminDashboardRedirect />} />
           <Route path="/student/dashboard" element={<Navigate to="/student" replace />} />
           <Route
             path="/dashboard"

@@ -20,12 +20,14 @@ import {
   FiMessageSquare,
   FiMoon,
   FiSun,
+  FiExternalLink,
 } from "react-icons/fi";
 import DashboardCard from "../components/DashboardCard";
 import ConfirmDialog from "../components/ConfirmDialog";
 import CountUpValue from "../components/CountUpValue";
 import LoadingSpinner from "../components/LoadingSpinner";
 import { useTheme } from "../lib/ThemeContext";
+import { SKILL_SITE_DEFAULTS } from "../lib/skillDefaults";
 import { toast } from "react-toastify";
 
 const navItems = [
@@ -65,11 +67,11 @@ const configuredApiHost = (() => {
 const API_HOSTS = Array.from(new Set([configuredApiHost, "", "http://localhost:4000", "http://localhost:5000"].filter(Boolean)));
 const RETRYABLE_STATUS = new Set([404, 408, 429, 500, 502, 503, 504]);
 const STUDENT_DASHBOARD_CACHE_KEY = "studentDashboardCache:v1";
-const STUDENT_DASHBOARD_CACHE_TTL_MS = 30000;
+const STUDENT_DASHBOARD_CACHE_TTL_MS = 60000; // 60 seconds cache for better performance
 const COURSES_PAGE_SIZE = 6;
 const IN_FLIGHT_GET_REQUESTS = new Map();
 
-const requestWithFallback = async (path, options = {}, timeoutMs = 8000) => {
+const requestWithFallback = async (path, options = {}, timeoutMs = 5000) => {
   const method = String(options?.method || "GET").toUpperCase();
   const isGet = method === "GET";
   const dedupeKey = isGet ? `${path}::${JSON.stringify(options?.headers || {})}` : "";
@@ -150,6 +152,114 @@ const splitSkillsByOwner = (items = []) => {
     allocated: normalized.filter((skill) => skill.addedBy === "admin"),
     personal: normalized.filter((skill) => skill.addedBy === "student"),
   };
+};
+
+const normalizeExternalUrl = (value = "") => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  const withLeadingProtocol = raw.startsWith("//") ? `https:${raw}` : raw;
+  const withProtocol = /^[a-z][a-z0-9+.-]*:\/\//i.test(withLeadingProtocol)
+    ? withLeadingProtocol
+    : `https://${withLeadingProtocol}`;
+
+  try {
+    const parsed = new URL(withProtocol);
+    if (!/^https?:$/i.test(parsed.protocol)) return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+};
+
+const normalizeName = (name) => (name || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+const CATEGORY_TO_DEFAULT_KEY = {
+  learning: "learning",
+  aptitude: "aptitude practice",
+  "problem-solving": "problem solving",
+  "problem solving": "problem solving",
+  coding: "coding practice",
+  communication: "communication practice",
+};
+
+const getWebsiteTitle = (site = {}, url = "") => {
+  const fallbackUrl =
+    String(url || site?.url || site?.link || "").trim() ||
+    normalizeExternalUrl(url || site?.url || site?.link || "");
+  const fallbackTitle = fallbackUrl.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+  return String(site?.title || site?.label || site?.type || fallbackTitle || "Open").trim();
+};
+
+const normalizeSites = (sites = []) =>
+  (Array.isArray(sites) ? sites : [])
+    .map((site) => {
+      const rawUrl = typeof site === "string" ? site : site?.url || site?.link || "";
+      const url = normalizeExternalUrl(rawUrl);
+      return {
+        label: getWebsiteTitle(site, url),
+        title: getWebsiteTitle(site, url),
+        url,
+      };
+    })
+    .filter((site) => Boolean(site.url));
+
+const getSkillSites = (skillName, skillWebsites = [], skillCategory = "", websiteRef = "") => {
+  const explicitSites = normalizeSites(skillWebsites);
+  if (explicitSites.length) return explicitSites;
+
+  const byName = SKILL_SITE_DEFAULTS[normalizeName(skillName)] || [];
+  const normalizedByName = normalizeSites(byName);
+  if (normalizedByName.length) return normalizedByName;
+
+  const byCategoryKey = CATEGORY_TO_DEFAULT_KEY[normalizeName(skillCategory)] || "";
+  const byCategory = byCategoryKey ? SKILL_SITE_DEFAULTS[byCategoryKey] || [] : [];
+  const normalizedByCategory = normalizeSites(byCategory);
+  if (normalizedByCategory.length) return normalizedByCategory;
+
+  const fallbackUrl = String(websiteRef || "").trim();
+  if (/^https?:\/\//i.test(fallbackUrl)) {
+    return [{ label: getWebsiteTitle({}, fallbackUrl), title: getWebsiteTitle({}, fallbackUrl), url: fallbackUrl }];
+  }
+
+  return [];
+};
+
+const openPracticeWindow = (url) => {
+  const targetUrl = normalizeExternalUrl(url);
+  if (!targetUrl) return null;
+
+  const screenWidth = Math.max(1024, Number(window.screen?.availWidth || window.innerWidth || 1280));
+  const screenHeight = Math.max(700, Number(window.screen?.availHeight || window.innerHeight || 800));
+  const features = [
+    "popup=yes",
+    "noopener",
+    "noreferrer",
+    `width=${screenWidth}`,
+    `height=${screenHeight}`,
+    "left=0",
+    "top=0",
+  ].join(",");
+
+  let popup = null;
+  try {
+    popup = window.open(targetUrl, "_blank", features);
+  } catch {
+    popup = null;
+  }
+
+  if (popup) {
+    try {
+      popup.focus();
+      popup.moveTo?.(0, 0);
+      popup.resizeTo?.(screenWidth, screenHeight);
+    } catch {
+      // Ignore browser restrictions for popup move/resize.
+    }
+    return popup;
+  }
+
+  return window.open(targetUrl, "_blank", "noopener,noreferrer");
 };
 
 export default function StudentDashboard() {
@@ -521,6 +631,30 @@ export default function StudentDashboard() {
     setEditingSkillId(skill.id);
   };
 
+  const handleSiteClick = (skill, url) => {
+    // Open the website and start the timer
+    if (url) openPracticeWindow(url);
+    // Start the skill timer
+    if (skill) {
+      const durationMs = skill.defaultDuration ? skill.defaultDuration * 60 * 1000 : 30 * 60 * 1000;
+      const now = Date.now();
+      // Store timer info in sessionStorage for persistence
+      try {
+        const timerData = {
+          skillId: skill.id,
+          skillName: skill.title,
+          durationMs,
+          startedAt: now,
+          status: "running",
+          elapsedMs: 0,
+        };
+        sessionStorage.setItem(`skillTimer:${skill.id}`, JSON.stringify(timerData));
+      } catch (err) {
+        console.warn("Failed to save timer data", err);
+      }
+    }
+  };
+
   const deleteSkill = async (skillId) => {
     if (actionLoading) return;
     const user = auth.currentUser;
@@ -771,17 +905,34 @@ export default function StudentDashboard() {
             <div className="text-center py-8 text-slate-500">No allocated courses yet</div>
           ) : (
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-              {allocatedSkills.map((skill) => (
-                <div key={skill.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-slate-900">{skill.title}</h4>
-                      <p className="text-sm text-slate-600 mt-1">{skill.description}</p>
+              {allocatedSkills.map((skill) => {
+                const sites = getSkillSites(skill.title, skill.skillWebsites, skill.skillCategory, skill.websiteRef);
+                return (
+                  <div key={skill.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-slate-900">{skill.title}</h4>
+                        <p className="text-sm text-slate-600 mt-1">{skill.description}</p>
+                      </div>
+                      <span className="text-xs font-semibold text-indigo-600 bg-indigo-100 px-3 py-1 rounded-full">Admin</span>
                     </div>
-                    <span className="text-xs font-semibold text-indigo-600 bg-indigo-100 px-3 py-1 rounded-full">Admin</span>
+                    {sites.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-3">
+                        {sites.map((site, idx) => (
+                          <button
+                            key={`${skill.id}-${idx}`}
+                            type="button"
+                            className="px-2.5 py-1.5 rounded-lg bg-white text-indigo-600 text-xs font-semibold border border-indigo-200 shadow-sm hover:bg-indigo-50 inline-flex items-center gap-1 transition-all"
+                            onClick={() => handleSiteClick(skill, site.url)}
+                          >
+                            <FiExternalLink className="text-[12px]" /> {site.title || site.label || "Open"}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -796,33 +947,50 @@ export default function StudentDashboard() {
             <div className="text-center py-8 text-slate-500">No courses added yet.</div>
           ) : (
             <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
-              {mySkills.map((skill) => (
-                <div key={skill.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex-1">
-                      <h4 className="font-semibold text-slate-900">{skill.title}</h4>
-                      <p className="text-sm text-slate-600 mt-1">{skill.description}</p>
+              {mySkills.map((skill) => {
+                const sites = getSkillSites(skill.title, skill.skillWebsites, skill.skillCategory, skill.websiteRef);
+                return (
+                  <div key={skill.id} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h4 className="font-semibold text-slate-900">{skill.title}</h4>
+                        <p className="text-sm text-slate-600 mt-1">{skill.description}</p>
+                      </div>
+                      <span className="text-xs font-semibold text-emerald-600 bg-emerald-100 px-3 py-1 rounded-full">Personal</span>
                     </div>
-                    <span className="text-xs font-semibold text-emerald-600 bg-emerald-100 px-3 py-1 rounded-full">Personal</span>
+                    {sites.length > 0 && (
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {sites.map((site, idx) => (
+                          <button
+                            key={`${skill.id}-${idx}`}
+                            type="button"
+                            className="px-2.5 py-1.5 rounded-lg bg-white text-emerald-600 text-xs font-semibold border border-emerald-200 shadow-sm hover:bg-emerald-50 inline-flex items-center gap-1 transition-all"
+                            onClick={() => handleSiteClick(skill, site.url)}
+                          >
+                            <FiExternalLink className="text-[12px]" /> {site.title || site.label || "Open"}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={() => editSkill(skill)}
+                        disabled={Boolean(actionLoading)}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-blue-100 text-blue-700 font-semibold text-sm hover:bg-blue-200 transition-all duration-200"
+                      >
+                        <FiEdit3 className="text-[14px]" /> Edit
+                      </button>
+                      <button
+                        onClick={() => setSkillPendingDelete({ id: skill.id, title: skill.title })}
+                        disabled={Boolean(actionLoading)}
+                        className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-red-100 text-red-700 font-semibold text-sm hover:bg-red-200 transition-all duration-200"
+                      >
+                        <FiTrash2 className="text-[14px]" /> Delete
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex gap-2 mt-3">
-                    <button
-                      onClick={() => editSkill(skill)}
-                      disabled={Boolean(actionLoading)}
-                      className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-blue-100 text-blue-700 font-semibold text-sm hover:bg-blue-200 transition-all duration-200"
-                    >
-                      <FiEdit3 className="text-[14px]" /> Edit
-                    </button>
-                    <button
-                      onClick={() => setSkillPendingDelete({ id: skill.id, title: skill.title })}
-                      disabled={Boolean(actionLoading)}
-                      className="flex-1 flex items-center justify-center gap-1 px-3 py-2 rounded-lg bg-red-100 text-red-700 font-semibold text-sm hover:bg-red-200 transition-all duration-200"
-                    >
-                      <FiTrash2 className="text-[14px]" /> Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

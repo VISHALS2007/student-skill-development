@@ -89,7 +89,7 @@ const TIMERS_KEY = "skillTimers:v1";
 const COMM_SESSION_STATE_KEY = "commSessionState:v1";
 const COMM_SESSION_COMPLETED_KEY = "commSessionCompleted:v1";
 const DASHBOARD_CACHE_KEY = "dashboard:skills-cache:v1";
-const DASHBOARD_CACHE_TTL_MS = 45000;
+const DASHBOARD_CACHE_TTL_MS = 60000; // 60 seconds cache for better performance
 
 const isLikelyIdLabel = (value = "") => {
   const normalized = String(value || "").trim();
@@ -606,7 +606,10 @@ const Dashboard = () => {
         if (!runningId) return prev;
         const entry = prev[runningId];
         if (!entry || entry.status !== "running") return prev;
-        const elapsedMs = Math.min(Date.now() - (entry.startedAt || Date.now()), entry.durationMs);
+        // Only update elapsed time if startedAt is a valid number
+        const validStartedAt = typeof entry.startedAt === "number" && entry.startedAt > 0;
+        if (!validStartedAt) return prev; // Skip update if startedAt is not valid
+        const elapsedMs = Math.min(Date.now() - entry.startedAt, entry.durationMs);
         return { ...prev, [runningId]: { ...entry, elapsedMs } };
       });
     }, 1000);
@@ -671,7 +674,8 @@ const Dashboard = () => {
           durationMs,
           elapsedMs,
           status: base.status || defaultStatus,
-          startedAt: base.startedAt || null,
+          // Preserve startedAt if status is running, otherwise set to null
+          startedAt: base.status === "running" ? base.startedAt : null,
         };
       });
       return next;
@@ -683,7 +687,11 @@ const Dashboard = () => {
     setSkillTimers((prev) => {
       const entry = prev[skillId];
       if (!entry) return prev;
-      const elapsedMs = entry.status === "running" ? Math.min(Date.now() - (entry.startedAt || Date.now()), entry.durationMs) : entry.elapsedMs || 0;
+      // Only calculate elapsed time if startedAt is valid
+      let elapsedMs = entry.elapsedMs || 0;
+      if (entry.status === "running" && typeof entry.startedAt === "number" && entry.startedAt > 0) {
+        elapsedMs = Math.min(Date.now() - entry.startedAt, entry.durationMs);
+      }
       return { ...prev, [skillId]: { ...entry, status: "paused", elapsedMs, startedAt: null } };
     });
     if (currentRunningId === skillId) {
@@ -837,7 +845,7 @@ const Dashboard = () => {
       navigate("/communication-session", { state: payload });
       return;
     }
-    openLiveTimerPinWindow();
+    // Open website AND start timer for regular skills
     if (url) openPracticeWindow(url);
     startSkill(skill);
   };

@@ -36,7 +36,7 @@ const configuredApiHost = (() => {
 const API_HOSTS = Array.from(new Set([configuredApiHost, "", "http://localhost:4000", "http://localhost:5000"].filter(Boolean)));
 const RETRYABLE_STATUS = new Set([404, 408, 429, 500, 502, 503, 504]);
 
-const requestWithFallback = async (path, options = {}, timeoutMs = 8000) => {
+const requestWithFallback = async (path, options = {}, timeoutMs = 5000) => {
   let lastError = null;
   for (const host of API_HOSTS) {
     const controller = new AbortController();
@@ -292,7 +292,10 @@ const Dashboard = () => {
         if (!runningId) return prev;
         const entry = prev[runningId];
         if (!entry || entry.status !== "running") return prev;
-        const elapsedMs = Math.min(Date.now() - (entry.startedAt || Date.now()), entry.durationMs);
+        // Only update elapsed time if startedAt is a valid number
+        const validStartedAt = typeof entry.startedAt === "number" && entry.startedAt > 0;
+        if (!validStartedAt) return prev; // Skip update if startedAt is not valid
+        const elapsedMs = Math.min(Date.now() - entry.startedAt, entry.durationMs);
         return { ...prev, [runningId]: { ...entry, elapsedMs } };
       });
     }, 1000);
@@ -338,7 +341,8 @@ const Dashboard = () => {
           durationMs,
           elapsedMs,
           status: base.status || defaultStatus,
-          startedAt: base.startedAt || null,
+          // Preserve startedAt if status is running, otherwise set to null
+          startedAt: base.status === "running" ? base.startedAt : null,
         };
       });
       return next;
@@ -350,7 +354,11 @@ const Dashboard = () => {
     setSkillTimers((prev) => {
       const entry = prev[skillId];
       if (!entry) return prev;
-      const elapsedMs = entry.status === "running" ? Math.min(Date.now() - (entry.startedAt || Date.now()), entry.durationMs) : entry.elapsedMs || 0;
+      // Only calculate elapsed time if startedAt is valid
+      let elapsedMs = entry.elapsedMs || 0;
+      if (entry.status === "running" && typeof entry.startedAt === "number" && entry.startedAt > 0) {
+        elapsedMs = Math.min(Date.now() - entry.startedAt, entry.durationMs);
+      }
       return { ...prev, [skillId]: { ...entry, status: "paused", elapsedMs, startedAt: null } };
     });
     if (currentRunningId === skillId) {
@@ -439,7 +447,7 @@ const Dashboard = () => {
       navigate("/communication-session", { state: payload });
       return;
     }
-    openLiveTimerPinWindow();
+    // Open website AND start timer for regular skills
     if (url) openPracticeWindow(url);
     startSkill(skill);
   };
